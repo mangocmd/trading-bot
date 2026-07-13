@@ -37,46 +37,61 @@ npm run gauntlet
 ```
 
 400 candidate strategies (moving-average crossovers, RSI reversion, channel breakouts, Bollinger
-dips, momentum, trend+dip combos), one gauntlet, three worlds, 10 years of SPY daily bars:
+dips, momentum, trend+dip combos), one gauntlet, three worlds, two books, 10 years of SPY daily bars:
 
-| world | survivors | median OOS Sharpe | beat buy & hold |
-|---|---|---|---|
-| real SPY | **4.3%** (17/400) | 0.66 | **0 of 17** |
-| SPY returns **shuffled** — drift kept, all structure destroyed | **4.0%** (158/4000) | 0.89 | 13 |
-| zero-drift random walk — drift removed too | **0.0%** (0/4000) | — | — |
+| book | real SPY | SPY returns **shuffled** (drift kept, structure destroyed) | **zero-drift** random walk | beat buy & hold |
+|---|---|---|---|---|
+| **long-only** | 4.0% | **4.7%** | **0.0%** | **0 of 16** |
+| **long/short** | 0.5% | **0.0%** | 0.1% | **0 of 2** |
 
-Read the three rows together, because separately they mislead.
+**The shuffled column is the control.** Shuffling preserves the mean, the volatility, the skew and
+the fat tails — it is literally the same returns in a different order. The only thing destroyed is
+the *sequence*, which is the only thing a strategy could possibly exploit. No pattern can exist there,
+by construction.
 
-**Row two is the permutation control.** Shuffling the returns preserves the mean, the volatility, the
-skew, and the fat tails — it is literally the same returns in a different order. The only thing
-destroyed is the sequence, which is the only thing a strategy could possibly exploit. No predictable
-pattern can exist there, by construction.
-
-The gauntlet passed candidates at the same rate anyway. And they look like real edges:
+The gauntlet passed candidates there anyway, and they look like real edges:
 
 ```
-breakout 21d, exit 9d  — OOS Sharpe 1.22, +80.7%
-momentum 133d          — OOS Sharpe 1.15, +125.6%
+MA cross 5/45  — OOS Sharpe 1.12, +88.6%     ← found in data with no structure
+momentum 65d   — OOS Sharpe 1.01, +74.5%     ← found in data with no structure
 ```
 
 Both cleared walk-forward validation, Monte-Carlo bootstrap, doubled costs and ±10% parameter jitter,
 in a world where there was nothing to find.
 
-**Row three explains rows one and two.** Take the drift away as well, and the survivor count goes to
-zero. Not lower — *zero*, out of four thousand. Nothing clears the gauntlet once there is no drift to
-sit in.
+### The diagonal is the proof
 
-So the survivors were never detecting structure. They were collecting beta. A long-only rule that
-happens to be in the market some fraction of the time earns that fraction of the drift, and whether
-the data contains an exploitable pattern makes no difference at all.
+Look at the shuffled column across the two books. **Same data. Same gauntlet. One difference: whether
+shorting is allowed.**
+
+- long-only: **4.7% survive**
+- long/short: **0.0% survive**
+
+There is nothing to find in that data. So the only thing the long-only survivors can be doing is
+**sitting in the drift** — and the moment you let them short, the drift cancels and they vanish.
+
+The zero-drift column confirms it from the other side: remove the drift from the world entirely and
+long-only survivors go to **0.0%**. Not lower. Zero, out of four thousand.
 
 > **A gauntlet cannot tell "found an edge" from "was long during an uptrend."** Every stage in it —
 > the folds, the bootstrap, the jitter — tests whether a result is *stable*. Passive exposure to a
-> drifting market is extremely stable.
+> drifting market is extremely stable. It sails through.
 
-Which is why none of the 17 real-data survivors beat buy-and-hold (+60.6% over the same stretch). Of
-course they didn't. They are partial-exposure buy-and-hold that also paid fees. **The gauntlet only
+So there are two different ways to contain no edge, and this gauntlet passes both:
+
+- **Long-only survivors are beta.** They die the instant the drift is removed.
+- **Long/short survivors are noise.** They clear the gauntlet on real data (0.5%) at the same rate
+  they clear it on a pure random walk (0.1%). Both numbers are the floor.
+
+And **not one survivor in either book beat buy-and-hold** (+60.6% over the same stretch). Of course
+not — the long-only ones are partial-exposure buy-and-hold that also paid fees. **The gauntlet only
 ever asks "is it profitable" — never "is it better than doing nothing."**
+
+*On the numbers:* the survivor **rates** carry seed noise — the shuffled long-only rate moved between
+roughly 2% and 6% across seeds while this was being built. Don't quote them to one decimal place.
+What is stable, and what the argument rests on, is the **shape**: shuffled ≈ real for long-only, zero
+once the drift is gone, long/short at the noise floor everywhere, and nothing anywhere beating
+buy-and-hold.
 
 ### Do this to your own pipeline
 
@@ -88,9 +103,16 @@ const result = nullTest(yourCandidates, yourReturns, 10, mulberry32(1));
 console.log(result.falsePositiveRate);   // ← the number that makes your gauntlet mean something
 ```
 
-If your real-data survivor rate is not far above your shuffled-data survivor rate, your survivors are
-noise wearing a beta costume. Tighten the gauntlet until the false-positive rate is near zero, then
-see what is left. Probably nothing. That is useful to know before you fund it.
+Two checks, in order of how much they will hurt:
+
+1. **Run the null.** If your real-data survivor rate is not far above your shuffled-data rate, your
+   survivors are noise. Tighten the gauntlet until the false-positive rate is near zero, then see
+   what's left.
+2. **Then let them short.** If your long-only survivors disappear when shorting is allowed, they were
+   never strategies. They were exposure.
+
+Both are cheap to run and neither is optional. `shuffleReturns()` is six lines — the whole idea is
+six lines. That's what makes it worth adding.
 
 ---
 
@@ -140,7 +162,7 @@ decoration.**
 
 ---
 
-## Eight times I fooled myself, and how each one was caught
+## Ten times I fooled myself, and how each one was caught
 
 These are the useful part. Every one of them produced a result that looked good, and every one was
 caught by being suspicious of a number that was too pretty.
@@ -178,12 +200,29 @@ caught by being suspicious of a number that was too pretty.
 
 8. **The null wasn't null.** While building the experiment that catches other people's false
    positives, I labelled a series "zero-structure random walk" — and left SPY's drift in it. It was
-   not a null at all, and the wrong number (5.6%) supported a wrong conclusion ("noise survives at a
+   not a null at all, and the wrong number supported a wrong conclusion ("noise survives at a
    *higher* rate than signal"). The corrected zero-drift control gives 0.0% and tells a stronger
    story. **Check that your control group is actually controlled.**
 
-The pattern in all eight: *the result was too good, so I went looking for the bug instead of the
+9. **Shorts priced as free.** Extending the harness to long/short, `evaluate()` still only counted
+   `exposure === 1` as an open position, and charged turnover on the wrong side of a flip. Every
+   short trade was free, and a long→short flip cost one unit instead of two. **This bug flattered
+   precisely the book the strongest claim in this repo rests on** — and it flattered it in my favour.
+   Caught by a test that measures the exact number of turnover units charged.
+
+10. **A second test that could not fail.** The first version of *that* test drove a deliberately
+    terrible strategy through `runGauntlet` and compared returns — but the gauntlet reports 0% for
+    anything that fails a gate, so a bad strategy scores 0 with or without the bug. It passed
+    vacuously. **The same mistake as #2, made again, eleven weeks later.** Rewritten against
+    `evaluate()` directly, then verified: inject the bug, test goes red with a message naming the
+    defect. Verify that your test can fail. Then verify it again the next time.
+
+The pattern in all ten: *the result was too good, so I went looking for the bug instead of the
 champagne.* That habit is the entire methodology. There is nothing else.
+
+Notice that #2 and #10 are the same error, and #8 and #9 were both found while building the tool that
+finds other people's errors. Rigour is not a state you reach. It is a thing you have to keep doing,
+and you will still fail at it.
 
 ---
 

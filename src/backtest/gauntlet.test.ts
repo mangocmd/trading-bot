@@ -6,6 +6,7 @@ import {
   shuffleReturns,
   mulberry32,
   toPrices,
+  evaluate,
   DEFAULT_GAUNTLET,
   type Candidate,
   type GauntletConfig,
@@ -176,10 +177,91 @@ test("jittered candidates keep their shape and stay valid", () => {
   const rand = mulberry32(31);
   const close = toPrices(returnSeries(800, 32));
   for (let i = 0; i < 20; i++) {
-    const c = randomCandidate(rand);
+    const c = randomCandidate(rand, "long_short");
     const j = c.jitter(rand);
     const sig = j.signals(close);
     assert.equal(sig.length, close.length, "a jittered candidate must still emit one signal per bar");
-    assert.ok(sig.every((s) => s === 0 || s === 1), "signals must be 0 or 1");
+    assert.ok(sig.every((s) => s === -1 || s === 0 || s === 1), "signals must be -1, 0 or 1");
   }
+});
+
+/**
+ * The book flag must actually change the book, not be a field nobody reads.
+ *
+ * This matters more than it looks. The long-only / long-short distinction is what separates
+ * "this rule found structure" from "this rule was in a rising market" — the central finding in the
+ * module comment. If `book: "long_short"` silently produced a long-only signal, that finding would
+ * be measuring the same thing twice and nobody would notice.
+ */
+test("a long/short candidate actually shorts, and a long-only one never does", () => {
+  const rand = mulberry32(41);
+  const close = toPrices(returnSeries(1500, 42));
+
+  let anyShorts = false;
+  for (let i = 0; i < 40; i++) {
+    const ls = randomCandidate(rand, "long_short");
+    if (ls.signals(close).some((s) => s === -1)) anyShorts = true;
+
+    const lo = randomCandidate(rand, "long_only");
+    assert.ok(
+      lo.signals(close).every((s) => s === 0 || s === 1),
+      `a long-only candidate emitted a short: ${lo.describe()}`,
+    );
+  }
+  assert.ok(anyShorts, "not one long/short candidate ever shorted — the book flag is being ignored");
+});
+
+/**
+ * Shorting must cost money, and a long→short flip must cost DOUBLE — it is two units of turnover,
+ * not one. An earlier version of the runner only recognised `exposure === 1` as an open position,
+ * which silently priced every short as free. That bug would have flattered precisely the book this
+ * project uses to make its strongest claim, so it gets pinned directly.
+ *
+ * Tested against `evaluate` rather than `runGauntlet`, because the gauntlet reports 0% for anything
+ * that fails a gate — so a deliberately terrible strategy scores 0 either way and the test proves
+ * nothing. The first version of this test did exactly that and passed vacuously against the bug.
+ */
+test("a long→short flip costs two units of turnover, not one, and shorts are not free", () => {
+  const ret = returnSeries(400, 51);
+  const COST = 0.01;
+  const sum = (v: number[]) => v.reduce((a, b) => a + b, 0);
+
+  // Cost is subtracted linearly from each bar's return, so the difference between a free run and a
+  // costly one, summed over the daily series, is EXACTLY the turnover charged. Comparing compounded
+  // totals instead would smear that with the compounding and blunt the assertion.
+  const unitsCharged = (sig: number[]): number =>
+    (sum(evaluate(sig, ret, 200, 400, 0, 252).daily) - sum(evaluate(sig, ret, 200, 400, COST, 252).daily)) / COST;
+
+  // The runner assumes flat at the start of the scored window, so every one of these pays one unit
+  // to enter. That is deliberate and conservative; what matters here is what it pays ON TOP.
+  const heldLong = new Array(400).fill(0);
+  for (let i = 100; i < 400; i++) heldLong[i] = 1;
+
+  const heldShort = new Array(400).fill(0);
+  for (let i = 100; i < 400; i++) heldShort[i] = -1;
+
+  // Long for the first half of the window, short for the second: entry (1 unit) plus one
+  // long→short flip worth |1 − (−1)| = 2 units.
+  const flipped = new Array(400).fill(0);
+  for (let i = 100; i < 300; i++) flipped[i] = 1;
+  for (let i = 300; i < 400; i++) flipped[i] = -1;
+
+  const longUnits = unitsCharged(heldLong);
+  const shortUnits = unitsCharged(heldShort);
+  const flipUnits = unitsCharged(flipped);
+
+  assert.ok(
+    Math.abs(shortUnits - longUnits) < 1e-6,
+    `holding a short was charged ${shortUnits.toFixed(3)} units against ${longUnits.toFixed(3)} for an ` +
+      `identical long — shorts are being priced differently, and cheaply.`,
+  );
+  assert.ok(
+    shortUnits > 0.5,
+    `holding a short was charged ${shortUnits.toFixed(3)} units of turnover — shorts are free.`,
+  );
+  assert.ok(
+    Math.abs(flipUnits - longUnits - 2) < 1e-6,
+    `a long→short flip was charged ${(flipUnits - longUnits).toFixed(3)} extra units, expected exactly 2. ` +
+      `Crossing from +1 to −1 is two units of turnover, not one.`,
+  );
 });

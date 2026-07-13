@@ -16,36 +16,48 @@ import type { Candle } from "./indicators.js";
  *
  * WHAT THIS FOUND (400 candidates, SPY daily, 10 years — reproduce with `npm run gauntlet`):
  *
- *   world                                       survivors   median OOS Sharpe   beat buy & hold
- *   real SPY                                    4.3%                     0.66           0 of 17
- *   SPY returns SHUFFLED (drift kept)           4.0%                     0.89          13 of 158
- *   zero-drift random walk (drift removed)      0.0%                        —                 —
+ *   book         real SPY     SHUFFLED (drift kept)   ZERO-DRIFT WALK   beat buy & hold
+ *   long-only    4.0%         4.7%                    0.0%              0 of 16
+ *   long/short   0.5%         0.0%                    0.1%              0 of 2
  *
- * Read those three rows together, because separately they mislead.
+ * The shuffled series has the same mean, volatility, skew and fat tails as the real one — it is
+ * literally the same returns, reordered. The only thing destroyed is the sequence, which is the only
+ * thing a rule could exploit. No structure can exist there, by construction.
  *
- * The shuffled series has the same mean, volatility, skew and fat tails as the real one — they are
- * literally the same returns, reordered. Predictable structure cannot exist in it. Yet the gauntlet
- * passes candidates there at the SAME rate as on real data (4.0% vs 4.3%), and they look like real
- * edges: `breakout 21d/9d — OOS Sharpe 1.22, +80.7%` cleared walk-forward, Monte-Carlo, doubled
- * costs and ±10% parameter jitter in a world where there was nothing to find.
+ * THE DIAGONAL IS THE PROOF. Same shuffled data, same gauntlet, one difference — whether shorting is
+ * allowed. Long-only: 4.7% survive. Long/short: 0.0% survive. Since there is nothing to find in that
+ * data, the only thing the long-only survivors can be doing is SITTING IN THE DRIFT. Allow them to
+ * short, the drift cancels, and the survivor count goes to zero immediately.
  *
- * The third row explains the first two. Take the drift away as well, and the survivor count goes to
- * ZERO — not "lower", zero, out of 4000. Nothing at all clears the gauntlet once there is no drift
- * to sit in. So the survivors were never detecting structure; they were collecting beta. A long-only
- * rule that happens to be in the market some fraction of the time earns that fraction of the drift,
- * and whether the data has any exploitable pattern makes no difference whatsoever.
+ * The zero-drift column confirms it from the other side: strip the drift out of the world entirely
+ * and long-only survivors go to 0.0% — not "lower", zero, out of 4000.
  *
- * That is the finding: A GAUNTLET CANNOT TELL "FOUND AN EDGE" FROM "WAS LONG DURING AN UPTREND."
- * Every robustness stage in it — the folds, the bootstrap, the jitter — tests whether the result is
- * stable, and passive exposure to a drifting market is extremely stable.
+ * The survivors that look most convincing come from data with nothing in it:
+ *   MA cross 5/45  — OOS Sharpe 1.12, +88.6%   (in shuffled data)
+ *   momentum 65d   — OOS Sharpe 1.01, +74.5%   (in shuffled data)
+ * Both cleared walk-forward, Monte-Carlo, doubled costs and ±10% parameter jitter.
  *
- * Which is why, on real data, NONE of the 17 survivors beat buy-and-hold (+60.6% over the same
- * stretch). Of course they didn't: they are partial-exposure buy-and-hold that also paid fees. The
+ * So there are two different ways to contain no edge, and this gauntlet passes both:
+ *   LONG-ONLY survivors are BETA  — they die the moment the drift is removed.
+ *   LONG/SHORT survivors are NOISE — they clear the gauntlet on real data (0.5%) at the same rate
+ *                                    they clear it on a pure random walk (0.1%). Both are the floor.
+ *
+ * A GAUNTLET CANNOT TELL "FOUND AN EDGE" FROM "WAS LONG DURING AN UPTREND." Every stage in it — the
+ * folds, the bootstrap, the jitter — tests whether a result is STABLE, and passive exposure to a
+ * drifting market is extremely stable.
+ *
+ * Which is why NOT ONE survivor in either book beat buy-and-hold (+60.6% over the same stretch). The
  * gauntlet only ever asks "is it profitable" — never "is it better than doing nothing."
  *
+ * ON THE NUMBERS: the survivor RATES carry seed noise (the shuffled long-only rate moved between
+ * roughly 2% and 6% across seeds during development). Do not quote them to one decimal place. What
+ * is stable, and what the argument rests on, is the SHAPE: shuffled ≈ real for long-only; zero once
+ * the drift is gone; long/short at the noise floor everywhere; and nothing, anywhere, beating
+ * buy-and-hold.
+ *
  * Use this on your own pipeline: run your generator and your gauntlet against `shuffleReturns()`
- * output and count what gets through. If your real-data survivor rate is not far above your
- * shuffled-data survivor rate, your survivors are noise wearing a beta costume.
+ * output and count what gets through. Then run it long/short. If your long-only survivors vanish
+ * when they are allowed to short, they were never strategies — they were exposure.
  */
 
 export interface GauntletConfig {
@@ -100,7 +112,14 @@ export interface GauntletVerdict {
 /** A candidate: a signal generator plus the parameters that a jitter step can perturb. */
 export interface Candidate {
   describe(): string;
-  /** 0 = flat, 1 = long, per bar. The runner applies the one-bar lag; do not lag it here. */
+  /**
+   * -1 = short, 0 = flat, +1 = long, per bar. The runner applies the one-bar lag; do not lag here.
+   *
+   * The short side is not decoration. A long-only book can earn a market's drift just by being in
+   * it, so a long-only candidate can clear a gauntlet without detecting anything — see the module
+   * comment. A long/short book has no drift to sit in, which makes it the harder and more honest
+   * test of whether a rule found any structure at all.
+   */
   signals(close: number[]): number[];
   /** Return a copy with every parameter multiplied by a factor near 1. */
   jitter(rand: () => number): Candidate;
@@ -115,7 +134,7 @@ function stdev(v: number[]): number {
   return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1));
 }
 
-interface Perf {
+export interface Perf {
   daily: number[];
   trades: number[];
   sharpe: number;
@@ -124,11 +143,14 @@ interface Perf {
 }
 
 /**
+ * Scores a signal series. Exported because it is the piece worth reusing and the piece worth
+ * testing: everything the gauntlet concludes rests on this function pricing exposure honestly.
+ *
  * Signal from bar i-1 earns bar i's return. A signal computed on bar i knows bar i's close, so
  * spending it on bar i's return is buying with knowledge of the move being harvested — the one-bar
  * leak that produced a fake Sharpe of 7 elsewhere in this project.
  */
-function evaluate(sig: number[], ret: number[], from: number, to: number, cost: number, ppy: number): Perf {
+export function evaluate(sig: number[], ret: number[], from: number, to: number, cost: number, ppy: number): Perf {
   const daily: number[] = [];
   const trades: number[] = [];
   let prev = 0;
@@ -137,9 +159,12 @@ function evaluate(sig: number[], ret: number[], from: number, to: number, cost: 
 
   for (let i = from; i < to; i++) {
     const exposure = sig[i - 1] ?? 0;
+    // Cost is charged on the CHANGE in exposure, so a long→short flip pays for two units of
+    // turnover, not one. An earlier version only recognised `exposure === 1` as a position, which
+    // silently priced every short as free.
     const r = exposure * ret[i] - Math.abs(exposure - prev) * cost;
     daily.push(r);
-    if (exposure === 1) {
+    if (exposure !== 0) {
       openTrade += r;
       inTrade = true;
     } else if (inTrade) {

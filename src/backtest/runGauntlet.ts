@@ -57,8 +57,19 @@ async function main() {
   const realReturns = returnsFromCandles(spy);
   console.log(`  ${spy.length} bars.\n`);
 
-  const candidates = generateCandidates(CANDIDATES, mulberry32(SEED));
-  const rand = mulberry32(SEED + 1);
+  // Two books. A long-only rule earns a drifting market's return just by being in it, so it can
+  // clear a gauntlet without detecting anything. A long/short rule has no drift to sit in and must
+  // actually find structure. Running both is what separates "found an edge" from "was long".
+  const longOnly = generateCandidates(CANDIDATES, mulberry32(SEED), "long_only");
+  const longShort = generateCandidates(CANDIDATES, mulberry32(SEED), "long_short");
+  const candidates = longOnly;
+
+  // Every (book, world, permutation) gets its own deterministic stream. Sharing one generator makes
+  // a result depend on which book ran first — the Monte-Carlo bootstrap draws differently depending
+  // on how much of the stream the previous book consumed. A tool whose whole pitch is
+  // reproducibility cannot have order-dependent output.
+  const streamFor = (book: number, world: number, perm: number) =>
+    mulberry32(SEED + book * 1_000_003 + world * 10_007 + perm * 101);
 
   console.log(`${CANDIDATES} candidate strategies (MA cross, RSI reversion, breakout, Bollinger, momentum, trend+dip).`);
   console.log(`Gauntlet: in-sample PF > ${DEFAULT_GAUNTLET.minInSamplePF} and ≥ ${DEFAULT_GAUNTLET.minTrades} trades`);
@@ -66,9 +77,15 @@ async function main() {
   console.log(`  → regime split (both halves profitable) → Monte-Carlo bootstrap (5th pct > 0, 95th pct drawdown < ${DEFAULT_GAUNTLET.maxBootstrapDrawdown * 100}%)`);
   console.log(`  → ±10% parameter jitter (${DEFAULT_GAUNTLET.minJitterSurvivors} of 10 must survive)\n`);
 
-  const runWorld = (returns: number[], tally: WorldTally, collectExamples: boolean) => {
+  const runWorld = (
+    book: typeof longOnly,
+    returns: number[],
+    tally: WorldTally,
+    rand: () => number,
+    collectExamples: boolean,
+  ) => {
     const close = toPrices(returns);
-    for (const c of candidates) {
+    for (const c of book) {
       const v = runGauntlet(c, close, returns, rand, DEFAULT_GAUNTLET);
       tally.deaths.set(v.diedAt, (tally.deaths.get(v.diedAt) ?? 0) + 1);
       if (!v.passed) continue;
@@ -81,39 +98,72 @@ async function main() {
     }
   };
 
-  const real = emptyTally();
-  runWorld(realReturns, real, true);
-
-  const shuffled = emptyTally();
-  for (let p = 0; p < PERMUTATIONS; p++) runWorld(shuffleReturns(realReturns, rand), shuffled, true);
-
-  // Synthetic walk with SPY's volatility and no drift — removes even the beta a long-only rule
-  // could passively collect, so nothing at all is left to find.
+  // The synthetic walk keeps SPY's volatility and drops the drift, so there is not even beta left
+  // for a long-only rule to passively collect.
   const vol = Math.sqrt(
     realReturns.slice(1).reduce((a, r) => a + r * r, 0) / (realReturns.length - 1),
   );
-  const walk = emptyTally();
-  for (let p = 0; p < PERMUTATIONS; p++) {
+  const zeroDriftWalk = (p: number): number[] => {
     const r = mulberry32(SEED + 500 + p);
     const synth = [0];
-    for (let i = 1; i < realReturns.length; i++) {
-      synth.push((r() + r() + r() - 1.5) * 2 * vol * 0.8165);
-    }
-    runWorld(synth, walk, false);
-  }
+    for (let i = 1; i < realReturns.length; i++) synth.push((r() + r() + r() - 1.5) * 2 * vol * 0.8165);
+    return synth;
+  };
 
   const nullTested = CANDIDATES * PERMUTATIONS;
+  const rate = (survivors: number, tested: number) => (100 * survivors) / tested;
   const row = (name: string, tested: number, t: WorldTally) =>
     console.log(
-      `${name.padEnd(28)} ${String(tested).padStart(10)} ${String(t.survivors).padStart(10)} ` +
-      `${((100 * t.survivors) / tested).toFixed(1).padStart(6)}% ${median(t.sharpes).toFixed(2).padStart(10)} ${String(t.beatBuyAndHold).padStart(12)}`,
+      `${name.padEnd(30)} ${String(tested).padStart(8)} ${String(t.survivors).padStart(10)} ` +
+      `${rate(t.survivors, tested).toFixed(1).padStart(6)}% ${median(t.sharpes).toFixed(2).padStart(10)} ${String(t.beatBuyAndHold).padStart(12)}`,
     );
 
-  console.log(`${"world".padEnd(28)} ${"tested".padStart(10)} ${"SURVIVORS".padStart(10)} ${"rate".padStart(7)} ${"med Sharpe".padStart(10)} ${"beat B&H".padStart(12)}`);
-  console.log("─".repeat(82));
-  row("REAL SPY", CANDIDATES, real);
-  row("SHUFFLED SPY (the null)", nullTested, shuffled);
-  row("ZERO-DRIFT RANDOM WALK", nullTested, walk);
+  const books: Array<{ label: string; real: WorldTally; shuffled: WorldTally; walk: WorldTally }> = [];
+
+  [["LONG-ONLY", longOnly], ["LONG/SHORT", longShort]].forEach(([label, set], b) => {
+    const bookSet = set as typeof longOnly;
+    const real = emptyTally();
+    runWorld(bookSet, realReturns, real, streamFor(b, 0, 0), true);
+
+    const shuffled = emptyTally();
+    for (let p = 0; p < PERMUTATIONS; p++) {
+      const s = streamFor(b, 1, p);
+      runWorld(bookSet, shuffleReturns(realReturns, s), shuffled, s, true);
+    }
+
+    const walk = emptyTally();
+    for (let p = 0; p < PERMUTATIONS; p++) runWorld(bookSet, zeroDriftWalk(p), walk, streamFor(b, 2, p), false);
+
+    books.push({ label: label as string, real, shuffled, walk });
+
+    console.log(`\n=== ${label} BOOK ===`);
+    console.log(`${"world".padEnd(30)} ${"tested".padStart(8)} ${"SURVIVORS".padStart(10)} ${"rate".padStart(7)} ${"med Sharpe".padStart(10)} ${"beat B&H".padStart(12)}`);
+    console.log("─".repeat(82));
+    row("REAL SPY", CANDIDATES, real);
+    row("SHUFFLED (drift kept)", nullTested, shuffled);
+    row("ZERO-DRIFT WALK", nullTested, walk);
+
+    if (shuffled.examples.length > 0) {
+      console.log(`  "strategies" found where NO structure exists (shuffled):`);
+      for (const e of shuffled.examples.slice(0, 3)) console.log(`    ${e}`);
+    }
+  });
+
+  const [lo, ls] = books;
+  const real = lo.real;
+  const shuffled = lo.shuffled;
+  const walk = lo.walk;
+
+  console.log(`\n\n=== WHAT THE TWO BOOKS MEAN TOGETHER ===\n`);
+  console.log(`LONG-ONLY survivors are BETA. They clear the gauntlet on shuffled data — where no`);
+  console.log(`  pattern exists — at ${((100 * lo.shuffled.survivors) / nullTested).toFixed(1)}%, essentially the real-data rate of ${((100 * lo.real.survivors) / CANDIDATES).toFixed(1)}%. Remove the drift`);
+  console.log(`  and they collapse to ${((100 * lo.walk.survivors) / nullTested).toFixed(1)}%. They were never detecting anything; they were in the market.`);
+  console.log(``);
+  console.log(`LONG/SHORT survivors are NOISE. With no drift to sit in, they clear the gauntlet on`);
+  console.log(`  REAL data at ${((100 * ls.real.survivors) / CANDIDATES).toFixed(1)}% — the same rate they clear it on a pure random walk (${((100 * ls.walk.survivors) / nullTested).toFixed(1)}%).`);
+  console.log(`  A survivor on real data is indistinguishable from a survivor on noise.`);
+  console.log(``);
+  console.log(`Two different ways of containing no edge. The gauntlet passes both.`);
 
   const fpr = (100 * shuffled.survivors) / nullTested;
   const tpr = (100 * real.survivors) / CANDIDATES;
