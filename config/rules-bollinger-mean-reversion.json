@@ -1,0 +1,18 @@
+{
+  "name": "bollinger-mean-reversion",
+  "timeframe": "1m",
+  "description": "Bollinger Bands mean reversion — fades price touching the outer bands, targeting a reversion to the middle band. Suited to ranging/choppy markets, not trending ones.",
+  "indicators": {
+    "bollingerPeriod": 20,
+    "bollingerStdDev": 2
+  },
+  "entry": {
+    "long": "price touches or crosses below the lower Bollinger Band",
+    "short": "price touches or crosses above the upper Bollinger Band"
+  },
+  "exit": {
+    "target": "price reverts to the middle Bollinger Band (SMA)",
+    "stopLossPct": 0.5
+  },
+  "riskPerTradePct": 1.0
+}

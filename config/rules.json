@@ -1,0 +1,14 @@
+{
+  "name": "demo-vwap-rsi-ema-scalp",
+  "timeframe": "1m",
+  "description": "VWAP + RSI(3) + EMA(8) scalping demo strategy",
+  "entry": {
+    "long": "price above VWAP AND RSI(3) crosses above 20 from oversold AND price above EMA(8)",
+    "short": "price below VWAP AND RSI(3) crosses below 80 from overbought AND price below EMA(8)"
+  },
+  "exit": {
+    "stopLossPct": 0.5,
+    "takeProfitPct": 1.0
+  },
+  "riskPerTradePct": 1.0
+}
