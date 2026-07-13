@@ -11,25 +11,58 @@ something other than what they appeared to measure.
 
 The code is here so you can check that. Every number below is reproducible from this repository.
 
-If you came looking for a strategy to run, close the tab. If you came to find out how to tell whether
-*your* strategy is real, keep reading — that is the one thing three months bought that is worth
-having, and it is in `src/backtest/gauntlet.ts`.
+If you came looking for a strategy to run, close the tab.
+
+**What's actually here, in descending order of how much it is worth your time:**
+
+1. **Two LLM experiments I have not seen run anywhere else.** An LLM reading 240 anonymized charts got
+   **43.3%** directional accuracy — worse than a coin flip — and **0%** on the nine calls it made at
+   high confidence. An LLM choosing which strategy to run each month, over 107 live decisions, landed
+   in the **36th percentile of 200 random pickers**. Buy-and-hold beat it 3x. Details below.
+2. **A permutation sweep of every candlestick pattern eleven features can express** (753 of them).
+   Direction: 3.0% "significant" on real data vs 3.2% on shuffled — indistinguishable. Volatility:
+   69.4% vs 5.4% — overwhelming. *Volatility clusters; direction doesn't*, measured directly.
+3. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. The
+   statistics here are **not novel** — Timothy Masters wrote a book about it, and the Deflated Sharpe
+   Ratio is the standard analytic version. See the credit section below. What's on offer is the
+   measurement, done, on a realistic modern gauntlet, in code you can run.
 
 ---
 
-## The thing worth stealing: your gauntlet has a false-positive rate, and you don't know it
+## The thing worth stealing: your gauntlet has a false-positive rate, and you probably haven't measured it
 
-Serious quant projects now put candidate strategies through a gauntlet designed to kill them:
-walk-forward out-of-sample folds, doubled fees and slippage, Monte-Carlo bootstrap on the trade
-sequence, regime splits, parameter jitter. That discipline is real, and it kills most candidates.
+### First, credit where it belongs
 
-It also does not solve multiple testing. A gauntlet raises the bar noise has to clear. It does not
-stop noise from clearing it — and a generator proposing unlimited candidates (an LLM, a grid search,
-a bored human) will clear any fixed bar eventually. **Without a null distribution, a gauntlet cannot
-distinguish a survivor from a lucky fraud, because nobody ever measured how often pure noise gets
-through.**
+**None of the statistics here is new, and I want that stated before anything else.** Permutation
+testing for trading systems is a solved problem with a literature:
 
-So measure it. Run the same candidates through the same gauntlet on data where an edge cannot exist.
+- **Timothy Masters, *Permutation and Randomization Tests for Trading System Development* (2020)** —
+  an entire book, with C++ implementations. It covers testing for overfitting, separating luck from
+  skill, removing selection bias when screening indicators, and — precisely the thing measured below —
+  **testing the reliability of a "trading system factory."** If you only read one thing on this, read
+  that instead of this README.
+- **Halbert White, *A Reality Check for Data Snooping* (2000)** — the foundational multiple-testing
+  correction for exactly this problem.
+- **Bailey & López de Prado, *The Deflated Sharpe Ratio* (2014)**, and their work on the **Probability
+  of Backtest Overfitting** — the standard analytic corrections for selection bias across N trials.
+
+So this repository does not present a discovery. It presents a **measurement** — the standard test,
+run against a modern, realistic gauntlet, with runnable code — plus one demonstration (the long/short
+diagonal below) that made the beta problem visceral for me in a way the theory did not.
+
+### The gap between knowing and doing
+
+Serious quant projects put candidate strategies through a gauntlet designed to kill them: walk-forward
+out-of-sample folds, doubled fees and slippage, Monte-Carlo bootstrap on the trade sequence, regime
+splits, parameter jitter. That discipline is real, and it kills most candidates.
+
+It does not solve multiple testing. A gauntlet raises the bar noise has to clear. It does not stop
+noise from clearing it — and a generator proposing unlimited candidates (an LLM, a grid search, a
+bored human) will clear any fixed bar eventually. **Without a null distribution, a gauntlet cannot
+distinguish a survivor from a lucky fraud.**
+
+Almost everyone in this field can recite that. Very few have run the number for their own pipeline.
+This is the number, for a gauntlet close to what people actually run.
 
 ```bash
 npm install

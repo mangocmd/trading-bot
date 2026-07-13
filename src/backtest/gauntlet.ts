@@ -3,16 +3,31 @@ import type { Candle } from "./indicators.js";
 /**
  * A strategy-discovery gauntlet, and the control that tells you what it is worth.
  *
+ * PRIOR ART, STATED UP FRONT. Nothing statistical here is original. Permutation testing for trading
+ * systems has a literature and a textbook:
+ *
+ *   - Timothy Masters, "Permutation and Randomization Tests for Trading System Development" (2020).
+ *     A whole book, with C++ code, covering overfitting, luck-versus-skill, selection bias when
+ *     screening indicators, and — exactly what `nullTest` below does — testing the reliability of a
+ *     "trading system factory". Read that instead of this comment.
+ *   - Halbert White, "A Reality Check for Data Snooping" (2000).
+ *   - Bailey & Lopez de Prado, "The Deflated Sharpe Ratio" (2014), and the Probability of Backtest
+ *     Overfitting — the standard analytic corrections for selection bias across N trials.
+ *
+ * This file is a MEASUREMENT, not a discovery: the standard test, run against a realistic modern
+ * gauntlet, in code you can execute. The permutation test measures directly what DSR approximates
+ * analytically, which is useful mainly because it needs no distributional assumptions.
+ *
  * Serious open-source quant projects now put candidate strategies through a gauntlet designed to
  * kill them: walk-forward out-of-sample folds, doubled fees and slippage, Monte-Carlo bootstrap on
  * the trade sequence, regime splits, parameter jitter. That discipline is real and it kills most
  * candidates. But a gauntlet does not solve multiple testing. It only raises the bar noise has to
  * clear — and a generator that can propose unlimited candidates will clear any fixed bar eventually.
  *
- * A gauntlet without a null distribution cannot tell a survivor from a lucky fraud, because nobody
- * measured how often pure noise survives it. So measure that: run the same candidates through the
- * same gauntlet on data where an edge cannot exist, and count the survivors. That number is the
- * gauntlet's false-positive rate, and without it a "validated" strategy means nothing.
+ * A gauntlet without a null distribution cannot tell a survivor from a lucky fraud. Almost everyone
+ * in this field can recite that. Very few have run the number for their own pipeline. So: run the
+ * same candidates through the same gauntlet on data where an edge cannot exist, and count the
+ * survivors. That number is the gauntlet's false-positive rate.
  *
  * WHAT THIS FOUND (400 candidates, SPY daily, 10 years — reproduce with `npm run gauntlet`):
  *
