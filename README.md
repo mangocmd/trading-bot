@@ -37,9 +37,13 @@ npm run gauntlet
 ```
 
 400 candidate strategies (moving-average crossovers, RSI reversion, channel breakouts, Bollinger
-dips, momentum, trend+dip combos), one gauntlet, three worlds, two books, 10 years of SPY daily bars:
+dips, momentum, trend+dip combos), one gauntlet, three worlds, two books, 10 years of SPY daily bars.
 
-| book | real SPY | SPY returns **shuffled** (drift kept, structure destroyed) | **zero-drift** random walk | beat buy & hold |
+**If you read one thing, read this:** on the *same* data with *no exploitable structure in it*, and
+the *same* gauntlet, allowing candidates to short takes the survival rate from **4.7% to 0.0%**. The
+survivors weren't finding an edge. They were sitting in the drift.
+
+| book | real SPY | **shuffled SPY**<br>(drift kept, structure destroyed) | **zero-drift walk**<br>(drift removed too) | beat buy & hold |
 |---|---|---|---|---|
 | **long-only** | 4.0% | **4.7%** | **0.0%** | **0 of 16** |
 | **long/short** | 0.5% | **0.0%** | 0.1% | **0 of 2** |
