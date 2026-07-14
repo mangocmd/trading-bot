@@ -11,18 +11,25 @@ something other than what they appeared to measure.
 
 The code is here so you can check that. Every number below is reproducible from this repository.
 
-If you came looking for a strategy to run, close the tab.
+**One honest qualification to that title, since the whole point of this repo is not overclaiming.**
+Two things in here do beat their own controls: volatility-managed position sizing, and diversified
+futures trend-following used as a *portfolio component*. Both improve risk-adjusted return, and both
+**earn less money than buy-and-hold does**. They buy a smoother path and they pay for it in return.
+So: no strategy in here makes more money than doing nothing. Two of them make the ride survivable,
+which is a different — and smaller — claim than the one you were sold.
+
+If you came looking for something that makes more money than an index fund, close the tab.
 
 **What's actually here, in descending order of how much it is worth your time:**
 
-1. **The experiment that refuted me, and then unrefuted itself when I checked the data.** I tested
-   diversified futures trend-following (24 markets, four asset classes, 22 years) and got **p =
-   0.020** — real timing skill, contradicting a claim this README led with. I wrote it up and
-   published it. Then I went looking for impossible numbers in the price series and found **three bad
-   bars out of 134,000**. Removing them moved the result to **p = 0.075**, and flipped the strategy
-   from beating a no-forecast control to losing to it. The refutation *was the bad data.* Both
-   versions are printed side by side by `npm run tsmom`. This is the most useful thing in the
-   repository and it is not a finding about markets.
+1. **The one thing that beat its own control — and the three bad bars I nearly proved it with.**
+   Diversified futures trend-following (24 markets, four asset classes, 22 years). Standalone it
+   loses to buy-and-hold and to books that forecast nothing. But **blended 50/50 with SPY it takes
+   Sharpe from 0.55 to 0.71 and cuts the max drawdown from 56.5% to 25.9%** — and it beats the
+   control that blends SPY with a futures book forecasting *nothing* (0.63). Correlation to SPY:
+   **−0.00**. That is a real edge, and it is insurance, not alpha: the annual return goes *down*.
+   Getting there required retracting a published result — my first run said "p = 0.020, real timing
+   skill", and **three bad bars out of 134,000 were doing the work.** `npm run tsmom` prints both.
 2. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. On
    *shuffled* SPY returns — no exploitable structure by construction — **4.7% of long-only candidates
    still cleared** walk-forward, Monte-Carlo, doubled costs and parameter jitter. Letting the same
@@ -241,15 +248,53 @@ TSMOM loses to DRIFT in **all three** of the regime splits. This is **Huang, Li,
 but indistinguishable from a strategy based on the historical sample mean that requires no
 predictability whatsoever.
 
-**One finding survives the cleaning, and it is the AQR one.** Bonds. The no-forecast control stays
-long through 2020–22 and is annihilated: **−95.3%**, a 97.3% drawdown. TSMOM flips short and makes
-**+342%**. That is crisis alpha, it is real, and cleaning the data does not touch it. **It is
-insurance, and the premium is paid in return** — the same shape as the volatility-managed sizing
-below, which is the only other survivor here.
+### …and then I noticed I was attacking a claim AQR never made
 
-Two things the headline still hides. That 5.8% needs **~26x notional leverage** on the low-vol legs
-(40%/σ on a 1.5%-vol two-year note); cap leverage at 1x and TSMOM pays **1.8%/yr**. And the first
-version of the null was broken in a different way — see entries 11 and 12 below.
+Every table above compares TSMOM to SPY **standalone**, and concludes it loses. That is true, and it
+is beside the point. **Nobody at AQR claims trend-following beats equities.** They claim it is
+*uncorrelated* with equities, so adding it to a portfolio that holds them improves that portfolio.
+
+I spent the whole project warning that comparing a diversifier to the thing it diversifies is the
+wrong test, and then did exactly that.
+
+So: measured correlation of TSMOM's daily returns to SPY's, over the same 22 years — **−0.00**.
+
+| SPY / TSMOM | annual | Sharpe | max drawdown | vs SPY alone |
+|---|---|---|---|---|
+| 100% / 0% | 9.1% | 0.55 | 56.5% | — |
+| 70% / 30% | 8.8% | 0.67 | 37.5% | **+0.11** |
+| **50% / 50%** | **8.2%** | **0.71** | **25.9%** | **+0.16** |
+| 0% / 100% | 5.8% | 0.44 | 33.6% | −0.11 |
+
+**AQR's claim survives.** A 50/50 blend takes Sharpe from 0.55 to **0.71** and cuts the maximum
+drawdown from 56.5% to **25.9%**. It is a broad plateau, not a fitted spike — every weight from 30%
+to 60% adds +0.11 or better.
+
+And it survives its own control, which is the part that matters. **Blend SPY with the futures book
+that forecasts nothing at all** — always long, provably zero timing skill — and you also get an
+improvement, because you have added a second asset: Sharpe 0.55 → 0.63. But TSMOM gets to **0.71**.
+
+> **The trend signal is doing +0.08 of Sharpe that a no-forecast futures book cannot do.** That is
+> what a real, if modest, edge looks like when you finally point the right test at it.
+
+**But look at what it is.** The annual return goes *down*: 9.1% → 8.2%. Sharpe goes up and drawdown
+halves because the path gets smoother, not because you earn more. **It is insurance, and the premium
+is paid in return** — the identical shape to the volatility-managed sizing below.
+
+The bond result says the same thing from the other side, and it is untouched by the data cleaning:
+the no-forecast control stays long bonds through 2020–22 and is annihilated (**−95.3%**, a 97.3%
+drawdown); TSMOM flips short and makes **+342%**. That is where the −0.00 correlation comes from, and
+it is why the blend works.
+
+**So the honest verdict on trend-following, after all of it:** as a strategy, it loses to buy-and-hold
+and to books that forecast nothing, and its standalone timing skill is not statistically established
+(p = 0.075). As a **portfolio component**, it earns its keep, it beats its own control, and it does so
+by being uncorrelated rather than by being right. **Every single thing that works in this repository is
+insurance. Not one of them is alpha.**
+
+One caveat the headline hides: that standalone 5.8% needs **~26x notional leverage** on the low-vol
+legs (40%/σ on a 1.5%-vol two-year note). Cap leverage at 1x and TSMOM pays **1.8%/yr**. Futures
+margin permits the leverage; your broker and your nerves are a separate question.
 
 ### The one thing that worked, and its honest size
 

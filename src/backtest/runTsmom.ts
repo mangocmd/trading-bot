@@ -16,7 +16,7 @@
 
 import { fetchStockCandles } from "./fetchStocks.js";
 import {
-  runBook, shufflePanel, alignPanel, cleanSeries, mulberry32, DEFAULT_CONFIG,
+  runBook, shufflePanel, alignPanel, cleanSeries, score, correlation, mulberry32, DEFAULT_CONFIG,
   type Series, type Control, type Perf, type TsmomConfig,
 } from "./tsmom.js";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -59,20 +59,17 @@ async function load(): Promise<{ panel: Series[]; spy: Series }> {
   return { panel: out, spy };
 }
 
-function buyHold(s: Series, from: number, to: number): Perf {
+/**
+ * Buy-and-hold returns over exactly the window the books trade.
+ *
+ * `from` is inclusive and must be the same index `runBook` starts earning on (lookback + 1), or the
+ * benchmark and the strategies are being measured over different windows — and, worse, their daily
+ * streams cannot be blended, because they are offset by a day.
+ */
+function buyHoldDaily(s: Series, from: number, to: number): number[] {
   const daily: number[] = [];
-  for (let i = from + 1; i <= to; i++) daily.push(s.close[i] / s.close[i - 1] - 1);
-  const n = daily.length;
-  const mean = daily.reduce((a, b) => a + b, 0) / n;
-  const sd = Math.sqrt(daily.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1));
-  let equity = 1, peak = 1, maxDd = 0;
-  for (const r of daily) { equity *= 1 + r; peak = Math.max(peak, equity); maxDd = Math.max(maxDd, (peak - equity) / peak); }
-  const years = n / 252;
-  return {
-    annReturn: equity ** (1 / years) - 1, annVol: sd * Math.sqrt(252),
-    sharpe: (mean * 252) / (sd * Math.sqrt(252)), maxDrawdown: maxDd,
-    totalReturn: equity - 1, turnover: 0, months: 0,
-  };
+  for (let i = from; i <= to; i++) daily.push(s.close[i] / s.close[i - 1] - 1);
+  return daily;
 }
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
@@ -124,7 +121,9 @@ async function main() {
 
   // SPY over the same window, as the thing every strategy in this repo has failed to beat. It starts
   // at the same index the books do, so nobody gets a free extra year.
-  const spy = buyHold(spyAligned, 253, spyAligned.close.length - 1);
+  const lookbackDays = Math.round(cfg.lookbackMonths * 252 / 12);
+  const spyDaily = buyHoldDaily(spyAligned, lookbackDays + 1, spyAligned.close.length - 1);
+  const spy = score(spyDaily);
 
   console.log("\n═══ 1. TSMOM vs the controls, real data ═══");
   console.log("  MOP construction: sign(12m return) x 40%/sigma, monthly, 1bp/side\n");
@@ -137,7 +136,8 @@ async function main() {
   const randomMean: Perf = {
     annReturn: mean(randomRuns.map((p) => p.annReturn)), annVol: mean(randomRuns.map((p) => p.annVol)),
     sharpe: mean(randomRuns.map((p) => p.sharpe)), maxDrawdown: mean(randomRuns.map((p) => p.maxDrawdown)),
-    totalReturn: mean(randomRuns.map((p) => p.totalReturn)), turnover: mean(randomRuns.map((p) => p.turnover)), months: 0,
+    totalReturn: mean(randomRuns.map((p) => p.totalReturn)), turnover: mean(randomRuns.map((p) => p.turnover)),
+    months: 0, daily: [],
   };
 
   row("TSMOM (the strategy)", tsmom, `turnover ${tsmom.turnover.toFixed(1)}x/yr`);
@@ -212,7 +212,55 @@ async function main() {
     row(`TSMOM cap ${cap === 0 ? "none" : `${cap}x`}`, runBook(panel, "tsmom", c));
   }
 
-  console.log("\n═══ 6. Regime split ═══");
+  console.log("\n═══ 6. The claim AQR actually makes ═══");
+  console.log("  Nobody at AQR says trend-following beats equities. They say it is UNCORRELATED with");
+  console.log("  them, so adding it to a portfolio that holds equities improves that portfolio. Every");
+  console.log("  comparison above tests a claim they do not make. This tests the one they do.\n");
+
+  const rhoTsmom = correlation(tsmom.daily, spyDaily);
+  const rhoAlways = correlation(alwaysLong.daily, spyDaily);
+  console.log(`  correlation to SPY:   TSMOM ${rhoTsmom.toFixed(2)}   ALWAYS LONG ${rhoAlways.toFixed(2)}`);
+  console.log(`  (a diversifier needs the first number to be near zero. it is.)\n`);
+
+  const blend = (a: number[], b: number[], w: number) =>
+    a.map((x, i) => (1 - w) * x + w * (b[i] ?? 0));
+
+  console.log(`  ${"SPY / TSMOM".padEnd(16)} ${"ann".padStart(7)} ${"sharpe".padStart(7)} ${"maxDD".padStart(7)}   vs SPY alone`);
+  let bestSharpe = spy.sharpe, bestW = 0;
+  for (const w of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]) {
+    const p = score(blend(spyDaily, tsmom.daily, w));
+    if (p.sharpe > bestSharpe) { bestSharpe = p.sharpe; bestW = w; }
+    const d = p.sharpe - spy.sharpe;
+    console.log(
+      `  ${`${((1 - w) * 100).toFixed(0)}% / ${(w * 100).toFixed(0)}%`.padEnd(16)} ${pct(p.annReturn).padStart(7)} ` +
+      `${p.sharpe.toFixed(2).padStart(7)} ${pct(p.maxDrawdown).padStart(7)}   ` +
+      `${d >= 0 ? "+" : ""}${d.toFixed(2)} Sharpe${w === 0 ? "  <- SPY alone" : ""}`,
+    );
+  }
+
+  // The control that decides whether any improvement is about TREND-FOLLOWING or merely about
+  // holding a second, differently-shaped thing. If a no-forecast futures book diversifies SPY just
+  // as well, then the diversification is coming from the futures panel, not from the trend signal.
+  console.log(`\n  the control: blend SPY with the book that forecasts NOTHING (always long futures)\n`);
+  console.log(`  ${"SPY / ALWAYS".padEnd(16)} ${"ann".padStart(7)} ${"sharpe".padStart(7)} ${"maxDD".padStart(7)}   vs SPY alone`);
+  let bestCtlSharpe = spy.sharpe, bestCtlW = 0;
+  for (const w of [0, 0.2, 0.3, 0.4, 0.5, 0.6]) {
+    const p = score(blend(spyDaily, alwaysLong.daily, w));
+    if (p.sharpe > bestCtlSharpe) { bestCtlSharpe = p.sharpe; bestCtlW = w; }
+    const d = p.sharpe - spy.sharpe;
+    console.log(
+      `  ${`${((1 - w) * 100).toFixed(0)}% / ${(w * 100).toFixed(0)}%`.padEnd(16)} ${pct(p.annReturn).padStart(7)} ` +
+      `${p.sharpe.toFixed(2).padStart(7)} ${pct(p.maxDrawdown).padStart(7)}   ${d >= 0 ? "+" : ""}${d.toFixed(2)} Sharpe`,
+    );
+  }
+
+  console.log(`\n  best SPY+TSMOM:       ${(bestW * 100).toFixed(0)}% TSMOM -> Sharpe ${bestSharpe.toFixed(2)} (SPY alone ${spy.sharpe.toFixed(2)})`);
+  console.log(`  best SPY+NO-FORECAST: ${(bestCtlW * 100).toFixed(0)}% control -> Sharpe ${bestCtlSharpe.toFixed(2)}`);
+  console.log(`  ${bestSharpe > bestCtlSharpe + 0.03
+    ? "  -> the TREND SIGNAL is doing work the no-forecast book cannot. AQR's claim survives."
+    : "  -> the no-forecast book diversifies just as well. The benefit is the futures panel,\n     not the trend signal. AQR's claim does not survive its own control."}`);
+
+  console.log("\n═══ 7. Regime split ═══");
   console.log("  Hurst-Ooi-Pedersen: positive in every decade since 1880. Does it hold here?\n");
   const n = panel[0].dates.length;
   const thirds = [[0, Math.floor(n / 3)], [Math.floor(n / 3), Math.floor(2 * n / 3)], [Math.floor(2 * n / 3), n]];

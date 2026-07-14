@@ -67,8 +67,33 @@ export interface Perf {
   sharpe: number;
   maxDrawdown: number;
   totalReturn: number;
-  turnover: number;   // annualised, sum of |Δposition| across instruments
+  turnover: number;   // annualised, per unit of portfolio
   months: number;
+  daily: number[];    // the return stream itself, so books can be blended rather than only compared
+}
+
+/**
+ * Scores an arbitrary return stream. Exposed so a blend of two books can be measured with exactly
+ * the same code that measures each of them alone — the AQR claim for trend-following is not that it
+ * beats equities, it is that it *improves a portfolio containing them*, and testing the claim they
+ * make instead of the one they don't requires this.
+ */
+export function score(daily: number[], ppy = 252): Perf {
+  return perf(daily, 0, ppy, 0);
+}
+
+/** Correlation of two aligned return streams. */
+export function correlation(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  const ma = a.slice(0, n).reduce((x, y) => x + y, 0) / n;
+  const mb = b.slice(0, n).reduce((x, y) => x + y, 0) / n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return da > 0 && db > 0 ? num / Math.sqrt(da * db) : 0;
 }
 
 function pctReturns(close: number[]): number[] {
@@ -116,7 +141,7 @@ function monthEnds(dates: number[]): number[] {
 
 function perf(daily: number[], turnoverTotal: number, ppy: number, months: number): Perf {
   const n = daily.length;
-  if (n === 0) return { annReturn: 0, annVol: 0, sharpe: 0, maxDrawdown: 0, totalReturn: 0, turnover: 0, months: 0 };
+  if (n === 0) return { annReturn: 0, annVol: 0, sharpe: 0, maxDrawdown: 0, totalReturn: 0, turnover: 0, months: 0, daily };
   const mean = daily.reduce((a, b) => a + b, 0) / n;
   const variance = daily.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, n - 1);
   const sd = Math.sqrt(variance);
@@ -136,6 +161,7 @@ function perf(daily: number[], turnoverTotal: number, ppy: number, months: numbe
     totalReturn: equity - 1,
     turnover: turnoverTotal / years,
     months,
+    daily,
   };
 }
 
