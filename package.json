@@ -9,7 +9,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/**/*.test.ts",
     "backtest": "tsx src/backtest/run.ts",
-    "gauntlet": "tsx src/backtest/runGauntlet.ts"
+    "gauntlet": "tsx src/backtest/runGauntlet.ts",
+    "tsmom": "tsx src/backtest/runTsmom.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
