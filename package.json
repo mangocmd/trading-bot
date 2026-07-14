@@ -10,7 +10,9 @@
     "test": "tsx --test src/**/*.test.ts",
     "backtest": "tsx src/backtest/run.ts",
     "gauntlet": "tsx src/backtest/runGauntlet.ts",
-    "tsmom": "tsx src/backtest/runTsmom.ts"
+    "tsmom": "tsx src/backtest/runTsmom.ts",
+    "xsmom": "tsx src/backtest/runXsmom.ts",
+    "dispersion": "tsx src/backtest/runDispersion.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

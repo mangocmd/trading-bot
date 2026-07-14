@@ -41,7 +41,14 @@ export interface Series {
  * ALWAYS_LONG    — sign is always +1. The dumbest possible drift harvester.
  * RANDOM         — sign is a coin flip, redrawn each rebalance, same vol scaling. The noise floor.
  */
-export type Control = "tsmom" | "drift" | "always_long" | "random";
+export type Control =
+  | "tsmom"          // sign(12m return). The single-horizon strawman.
+  | "tsmom_multi"    // AQR's ACTUAL construction: 1m + 3m + 12m, equally weighted.
+  | "xsmom"          // cross-sectional: rank the markets, long the top third, short the bottom.
+  | "carry_bond"     // slope of the yield curve, applied to the bond leg. A different signal family.
+  | "drift"          // sign of the expanding historical mean. Forecasts nothing.
+  | "always_long"    // sign is always +1. Forecasts nothing, and provably has zero timing skill.
+  | "random";        // coin flip. The noise floor.
 
 export interface TsmomConfig {
   lookbackMonths: number;   // 12
@@ -166,6 +173,97 @@ function perf(daily: number[], turnoverTotal: number, ppy: number, months: numbe
 }
 
 /**
+ * The signal for every instrument at bar `i`. Nothing here may read past `i`.
+ *
+ * All of these are causal by construction — they index `close[i]` and backwards, never forwards —
+ * but that is worth stating out loud, because the one-bar lag lives in the caller (a signal computed
+ * at a month end first earns on the following day) and it would be easy to erase it here.
+ */
+function signalsAt(
+  panel: Series[],
+  rets: number[][],
+  control: Control,
+  i: number,
+  lookbackDays: number,
+  config: TsmomConfig,
+  rand: () => number,
+): number[] {
+  const N = panel.length;
+  const ppy = config.periodsPerYear;
+
+  switch (control) {
+    case "tsmom":
+      return panel.map((s) => Math.sign(s.close[i] / s.close[i - lookbackDays] - 1));
+
+    case "tsmom_multi": {
+      // AQR's actual construction (Hurst, Ooi & Pedersen 2017) blends THREE horizons -- 1, 3 and 12
+      // months, equally weighted -- not the single 12-month signal `tsmom` uses. Testing a
+      // one-horizon version and calling it "trend following" is a strawman of what they run, and I
+      // built the strawman first.
+      const horizons = [Math.round(ppy / 12), Math.round(ppy / 4), lookbackDays];
+      return panel.map((s) => {
+        let sum = 0;
+        for (const h of horizons) {
+          if (i - h < 0) continue;
+          sum += Math.sign(s.close[i] / s.close[i - h] - 1);
+        }
+        return sum / horizons.length; // in [-1, 1], so a market can be half-on
+      });
+    }
+
+    case "xsmom": {
+      // Cross-sectional momentum: rank the markets against EACH OTHER, long the top third, short the
+      // bottom third, flat in the middle. A different hypothesis from time-series momentum -- "the
+      // strongest market will keep outrunning the weakest" rather than "a rising market keeps
+      // rising" -- and it is dollar-neutral by construction, so it cannot sit in the drift.
+      const scores = panel.map((s, k) => ({ k, r: s.close[i] / s.close[i - lookbackDays] - 1 }));
+      scores.sort((a, b) => b.r - a.r);
+      const third = Math.max(1, Math.floor(N / 3));
+      const out = new Array(N).fill(0);
+      for (let j = 0; j < third; j++) out[scores[j].k] = 1;
+      for (let j = N - third; j < N; j++) out[scores[j].k] = -1;
+      return out;
+    }
+
+    case "carry_bond": {
+      // Bond carry: the slope of the yield curve. When the curve is upward-sloping, a bond future
+      // rolls down it and earns carry regardless of what yields do next -- the classic "carry"
+      // signal (Koijen, Moskowitz, Pedersen & Vrugt 2018), and a DIFFERENT signal family from
+      // momentum, which is why institutions run both.
+      //
+      // Proxied here from the panel itself: the 2y note (ZT) and the 30y bond (ZB) both trade in
+      // this universe, and the ratio of their trailing returns is a crude read on whether the curve
+      // has been steepening or flattening. This is a proxy, not the real thing -- the real thing
+      // needs actual yields, which are not in this dataset. Flagged rather than hidden.
+      const zt = panel.findIndex((s) => s.symbol === "ZT=F");
+      const zb = panel.findIndex((s) => s.symbol === "ZB=F");
+      if (zt < 0 || zb < 0) return new Array(N).fill(0);
+      const h = Math.round(ppy / 4);
+      const shortEnd = panel[zt].close[i] / panel[zt].close[i - h] - 1;
+      const longEnd = panel[zb].close[i] / panel[zb].close[i - h] - 1;
+      // Long end outperforming the short end = the curve flattened = duration was rewarded.
+      const s = Math.sign(longEnd - shortEnd);
+      return panel.map((p) => (p.assetClass === "bond" ? s : 0));
+    }
+
+    case "drift":
+      // Sign of the mean daily return over everything seen so far. No forecast, no timing -- just
+      // "has this thing gone up, historically."
+      return panel.map((_, k) => {
+        let sum = 0;
+        for (let j = 1; j <= i; j++) sum += rets[k][j];
+        return Math.sign(sum);
+      });
+
+    case "always_long":
+      return new Array(N).fill(1);
+
+    case "random":
+      return panel.map(() => (rand() < 0.5 ? -1 : 1));
+  }
+}
+
+/**
  * Runs one book over an aligned panel of instruments.
  *
  * `panel` must be date-aligned: every series has the same dates array. Positions are set at month
@@ -204,34 +302,16 @@ export function runBook(
     while (nextEnd < ends.length && ends[nextEnd] < i) nextEnd++;
     if (nextEnd < ends.length && ends[nextEnd] === i) {
       rebalances++;
+
+      // Signals are computed for the whole panel first, because a cross-sectional book has to rank
+      // the markets against each other before it can size any one of them.
+      const signs = signalsAt(panel, rets, control, i, lookbackDays, config, rand);
+
       for (let k = 0; k < panel.length; k++) {
-        const close = panel[k].close;
         const sigma = vols[k][i];
         if (!Number.isFinite(sigma) || sigma <= 0) { positions[k] = 0; continue; }
 
-        let sign: number;
-        switch (control) {
-          case "tsmom":
-            sign = Math.sign(close[i] / close[i - lookbackDays] - 1);
-            break;
-          case "drift": {
-            // Sign of the mean daily return over everything seen so far. No forecast, no timing —
-            // just "has this thing gone up, historically."
-            let sum = 0;
-            for (let j = 1; j <= i; j++) sum += rets[k][j];
-            sign = Math.sign(sum);
-            break;
-          }
-          case "always_long":
-            sign = 1;
-            break;
-          case "random":
-            sign = rand() < 0.5 ? -1 : 1;
-            break;
-        }
-        if (sign === 0) sign = 0;
-
-        let target = sign * (config.targetVol / sigma);
+        let target = signs[k] * (config.targetVol / sigma);
         if (config.maxLeverage > 0) target = Math.max(-config.maxLeverage, Math.min(config.maxLeverage, target));
 
         const delta = Math.abs(target - positions[k]);

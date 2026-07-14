@@ -83,6 +83,7 @@ function header() {
   console.log(`  ${"".padEnd(30)} ${"ann".padStart(7)} ${"sharpe".padStart(6)} ${"maxDD".padStart(7)} ${"total".padStart(9)}`);
 }
 const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+const blend = (a: number[], b: number[], w: number) => a.map((x, i) => (1 - w) * x + w * (b[i] ?? 0));
 
 async function main() {
   console.log("\nloading 25y of futures data (cached after first run)");
@@ -156,7 +157,7 @@ async function main() {
   console.log("    shuffled ≈ real  ->  the book has no timing skill, it is harvesting drift");
   console.log("    shuffled << real ->  the book is reading something in the sequence\n");
 
-  const real: Record<Control, Perf> = { tsmom, drift, always_long: alwaysLong, random: randomMean };
+  const real: Partial<Record<Control, Perf>> = { tsmom, drift, always_long: alwaysLong, random: randomMean };
 
   for (const sync of [true, false]) {
     console.log(sync
@@ -171,7 +172,7 @@ async function main() {
       const runs = Array.from({ length: PERMUTATIONS }, (_, i) =>
         runBook(shufflePanel(panel, mulberry32(SEED + i * 7919), sync), control, cfg, mulberry32(SEED + i * 31)));
       const sh = runs.map((p) => p.sharpe).sort((a, b) => a - b);
-      const r = real[control].sharpe;
+      const r = real[control]!.sharpe;
       const beat = sh.filter((s) => s >= r).length;
       const p = (beat + 1) / (PERMUTATIONS + 1);
       const tag = p < 0.05 ? "  <- reads the sequence" : beat > PERMUTATIONS * 0.9 ? "  <- null BEATS it" : "";
@@ -222,9 +223,6 @@ async function main() {
   console.log(`  correlation to SPY:   TSMOM ${rhoTsmom.toFixed(2)}   ALWAYS LONG ${rhoAlways.toFixed(2)}`);
   console.log(`  (a diversifier needs the first number to be near zero. it is.)\n`);
 
-  const blend = (a: number[], b: number[], w: number) =>
-    a.map((x, i) => (1 - w) * x + w * (b[i] ?? 0));
-
   console.log(`  ${"SPY / TSMOM".padEnd(16)} ${"ann".padStart(7)} ${"sharpe".padStart(7)} ${"maxDD".padStart(7)}   vs SPY alone`);
   let bestSharpe = spy.sharpe, bestW = 0;
   for (const w of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0]) {
@@ -260,7 +258,68 @@ async function main() {
     ? "  -> the TREND SIGNAL is doing work the no-forecast book cannot. AQR's claim survives."
     : "  -> the no-forecast book diversifies just as well. The benefit is the futures panel,\n     not the trend signal. AQR's claim does not survive its own control."}`);
 
-  console.log("\n═══ 7. Regime split ═══");
+  console.log("\n═══ 7. The other signal families ═══");
+  console.log("  Everything above tested ONE signal: sign(12-month return). That is a strawman of what");
+  console.log("  the institutions actually run. AQR blends 1m+3m+12m. Cross-sectional momentum is a");
+  console.log("  different hypothesis entirely. Carry is a different signal FAMILY (Koijen, Moskowitz,");
+  console.log("  Pedersen & Vrugt 2018) and is why every real fund runs more than one.\n");
+  console.log("  The only question that matters: does it add Sharpe to SPY beyond what a book that");
+  console.log("  forecasts NOTHING adds? The no-forecast control gets SPY from 0.55 to 0.63.\n");
+
+  const families: Array<[Control, string]> = [
+    ["tsmom", "TSMOM 12m (the strawman)"],
+    ["tsmom_multi", "TSMOM 1m+3m+12m (AQR's real one)"],
+    ["xsmom", "cross-sectional momentum"],
+    ["carry_bond", "bond carry (curve slope proxy)"],
+    ["always_long", "-- control: forecasts nothing"],
+  ];
+
+  console.log(`  ${"".padEnd(33)} ${"solo".padStart(5)} ${"corr".padStart(5)} ${"p".padStart(6)}   ${"best blend w/ SPY".padStart(18)}`);
+  for (const [ctl, label] of families) {
+    const book = runBook(panel, ctl, cfg);
+    if (book.daily.every((x) => x === 0)) { console.log(`  ${label.padEnd(33)}  (no positions)`); continue; }
+
+    const rho = correlation(book.daily, spyDaily);
+
+    const nulls = Array.from({ length: PERMUTATIONS }, (_, i) =>
+      runBook(shufflePanel(panel, mulberry32(SEED + i * 7919), true), ctl, cfg, mulberry32(SEED + i * 31)).sharpe)
+      .sort((a, b) => a - b);
+    const beat = nulls.filter((s) => s >= book.sharpe).length;
+    const p = (beat + 1) / (PERMUTATIONS + 1);
+
+    let best = spy.sharpe, bestW = 0;
+    for (const w of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]) {
+      const s = score(blend(spyDaily, book.daily, w)).sharpe;
+      if (s > best) { best = s; bestW = w; }
+    }
+    const lift = best - spy.sharpe;
+    // 0.63 is what the no-forecast control achieves. Anything at or below that is buying you
+    // diversification, not prediction.
+    const verdict = ctl === "always_long" ? "  <- the bar"
+      : best > bestCtlSharpe + 0.03 ? `  <- BEATS the no-forecast control`
+      : "  <- no better than owning a 2nd asset";
+    console.log(
+      `  ${label.padEnd(33)} ${book.sharpe.toFixed(2).padStart(5)} ${rho.toFixed(2).padStart(5)} ` +
+      `${p.toFixed(3).padStart(6)}   ${`${best.toFixed(2)} @ ${(bestW * 100).toFixed(0)}%`.padStart(18)} (+${lift.toFixed(2)})${verdict}`,
+    );
+  }
+
+  console.log("\n  and all of them together, equally weighted:\n");
+  const combo = ["tsmom_multi", "xsmom", "carry_bond"] as Control[];
+  const books = combo.map((c) => runBook(panel, c, cfg));
+  const comboDaily = books[0].daily.map((_, i) => mean(books.map((b) => b.daily[i] ?? 0)));
+  const comboPerf = score(comboDaily);
+  header();
+  row("combined (multi+xs+carry)", comboPerf, `corr to SPY ${correlation(comboDaily, spyDaily).toFixed(2)}`);
+  let comboBest = spy.sharpe, comboBestW = 0;
+  for (const w of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]) {
+    const s = score(blend(spyDaily, comboDaily, w)).sharpe;
+    if (s > comboBest) { comboBest = s; comboBestW = w; }
+  }
+  const comboBlend = score(blend(spyDaily, comboDaily, comboBestW));
+  row(`SPY + ${(comboBestW * 100).toFixed(0)}% combined`, comboBlend, `vs SPY alone ${spy.sharpe.toFixed(2)} / DD ${pct(spy.maxDrawdown)}`);
+
+  console.log("\n═══ 8. Regime split ═══");
   console.log("  Hurst-Ooi-Pedersen: positive in every decade since 1880. Does it hold here?\n");
   const n = panel[0].dates.length;
   const thirds = [[0, Math.floor(n / 3)], [Math.floor(n / 3), Math.floor(2 * n / 3)], [Math.floor(2 * n / 3), n]];

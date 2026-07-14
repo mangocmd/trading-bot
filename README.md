@@ -22,15 +22,21 @@ If you came looking for something that makes more money than an index fund, clos
 
 **What's actually here, in descending order of how much it is worth your time:**
 
-1. **The one thing that beat its own control — and the three bad bars I nearly proved it with.**
-   Diversified futures trend-following (24 markets, four asset classes, 22 years). Standalone it
-   loses to buy-and-hold and to books that forecast nothing. But **blended 50/50 with SPY it takes
-   Sharpe from 0.55 to 0.71 and cuts the max drawdown from 56.5% to 25.9%** — and it beats the
-   control that blends SPY with a futures book forecasting *nothing* (0.63). Correlation to SPY:
-   **−0.00**. That is a real edge, and it is insurance, not alpha: the annual return goes *down*.
-   Getting there required retracting a published result — my first run said "p = 0.020, real timing
-   skill", and **three bad bars out of 134,000 were doing the work.** `npm run tsmom` prints both.
-2. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. On
+1. **The fifth promising result, and the first to survive.** **Cross-sectional momentum on 24 futures**
+   — rank the markets, long the top third, short the bottom third. p = 0.025 against a 200-draw null;
+   **0 of 50 random dollar-neutral books beat it**; it is **dollar-neutral by construction, so unlike
+   every other survivor in this repo it cannot be sitting in the drift** (correlation to SPY: 0.01);
+   and blended with SPY it lifts portfolio Sharpe from 0.55 to **0.77**, past the 0.63 that a book
+   forecasting *nothing* achieves. I attacked it four separate ways and it got stronger each time.
+   **Caveat that must come with the number: I tried four signal families before this one came up
+   significant. Bonferroni puts the honest p near 0.10.** `npm run xsmom`, `npm run dispersion`.
+2. **A result I published, and then retracted three days later.** Diversified futures trend-following
+   looked like it had real timing skill at **p = 0.020**. Then I audited the input prices and found
+   **three bad bars out of 134,000** — a yen future that "moved 904%", and crude oil's −$37 close
+   being converted into a −306% *return* against a book that was short crude that month. Cleaning
+   them took it to **p = 0.075** and flipped it from beating a no-forecast control to losing to it.
+   **The refutation was the bad data.** `npm run tsmom` prints both versions.
+3. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. On
    *shuffled* SPY returns — no exploitable structure by construction — **4.7% of long-only candidates
    still cleared** walk-forward, Monte-Carlo, doubled costs and parameter jitter. Letting the same
    candidates short took survival to **0.0%**. The statistics here are **not novel** — Timothy Masters
@@ -296,7 +302,69 @@ One caveat the headline hides: that standalone 5.8% needs **~26x notional levera
 legs (40%/σ on a 1.5%-vol two-year note). Cap leverage at 1x and TSMOM pays **1.8%/yr**. Futures
 margin permits the leverage; your broker and your nerves are a separate question.
 
-### The one thing that worked, and its honest size
+### Cross-sectional momentum: the first thing that survived everything I threw at it
+
+`src/backtest/tsmom.ts` — `npm run xsmom` and `npm run dispersion`.
+
+**Read this before the numbers.** I tried four signal families — single-horizon trend, AQR's actual
+multi-horizon trend, cross-sectional momentum, and a carry proxy — and this is the one that came up
+significant. **Four tests. A nominal p of 0.025 among four is not a p of 0.025; Bonferroni puts it
+near 0.10.** Everything below is me trying to kill it, and failing. Judge the failures.
+
+**The strategy.** Each month, rank all 24 futures by trailing 12-month return. Long the top third,
+short the bottom third, flat in the middle. Size each position to 40%/σ. That is the whole thing. The
+lookback and the cut are the canonical ones from the momentum literature — **they were not chosen from
+the grid.**
+
+**Why it is different from everything else here.** It is **dollar-neutral by construction**: as many
+markets short as long. The single most common failure mode in this repository — a book that looks
+clever but is really just sitting in a drifting market — is *structurally impossible* for it. There is
+a test enforcing that, which goes red the moment the shorts stop being shorts.
+
+| test | result |
+|---|---|
+| solo | Sharpe **0.55**, 5.4%/yr, corr to SPY **0.01** |
+| vs a 200-draw synchronized null | **p = 0.025** |
+| vs 50 **random dollar-neutral** books (same markets, same vol-scaling, same costs, no ranking) | random mean Sharpe **−0.10**. **0 of 50 beat it.** |
+| blended with SPY | Sharpe 0.55 → **0.77**. The no-forecast control only reaches **0.63**. |
+| parameter grid (5 lookbacks × 3 cuts) | **15 of 15 cells positive.** Significance peaks at 12 months and falls off either side — *the hump the momentum literature predicts.* |
+| sub-periods | **3 of 3 positive** (0.21 / 0.65 / 1.21) |
+| the recent third alone, vs its own null | **p = 0.005**, 0 of 200 |
+| costs | survives to 10bp/side. Dies at 20. Liquid futures are 1–3. |
+
+**The attack I was sure would work, and didn't.** The sub-period Sharpes rise monotonically — 0.21,
+0.65, 1.21 — and *every factor-decay study says a published edge should weaken, not strengthen*. The
+obvious explanation: 2019–26 (COVID, the melt-up, the inflation shock) had enormous cross-sectional
+**dispersion**, and any long-winners/short-losers book makes money when the winners and losers are far
+apart, whether or not it can pick them. So XSMOM would not be a forecast at all — it would be a long
+position in dispersion, and nobody told you you were making that bet.
+
+Four ways of testing it, four answers against me:
+
+- **Did dispersion rise?** 0.912 → 0.927 → 0.913. **It did not.** The hypothesis dies at the first test.
+- **Does XSMOM only pay when markets are spread apart?** The opposite. **Low-dispersion Sharpe 0.80,
+  high-dispersion 0.30.** It pays *more* in calm markets.
+- **Is it the ranking, or just being dollar-neutral?** A random long/short book on the same markets
+  scores **−0.10**. The ranking is not decoration.
+- **Is the recent strength a lucky stretch?** Inside that window, against its own null: **p = 0.005**.
+
+And the "monotonic rise" I found so suspicious: with seven-year windows, the standard error of a
+Sharpe estimate is about **0.38**, and of the *difference* between two of them about 0.53. A rise from
+0.21 to 1.21 is **1.9σ.** That is inside sampling error. **I was pattern-matching on noise** — which is
+the exact error this whole repository exists to document, committed while auditing for it.
+
+**What it still is not.** Solo it earns **5.4%/yr against SPY's 9.1%**. Blended, the portfolio earns
+**7.5% against 9.1%.** It buys a Sharpe of 0.77 and a 22.5% drawdown instead of 56.5% — and it pays
+for both in return. The fair defence, which I accept: a **zero-beta** book can be levered, and at
+equal volatility to SPY it earns roughly the same money with none of the correlation. That is what
+market-neutral funds do, and it is a real thing to have.
+
+But note what has happened here. **The best result in three months of work is a strategy with a Sharpe
+of 0.55 that earns less than an index fund, whose honest p-value after multiple testing is around
+0.10, and whose entire value proposition is that it is uncorrelated.** That is what the top of the
+retail-accessible pile actually looks like.
+
+### The other thing that worked, and its honest size
 
 `src/backtest/portfolioStrategy.ts`. Hold the index; vary only *how much* you hold, sized so the
 book's forecast volatility stays near a target. It rests on the thing this project found to be most

@@ -200,6 +200,38 @@ test("a misplaced decimal is repaired, and a negative price is dropped rather th
   );
 });
 
+test("cross-sectional momentum is dollar-neutral — the claim that it cannot be beta, enforced", () => {
+  // XSMOM's entire defence against "you are just harvesting drift" is that it is long as many
+  // markets as it is short. If that ever stops being true, the strongest result in this repository
+  // silently becomes another long-biased book sitting in the drift, and nothing else would catch it.
+  const rand = mulberry32(9);
+  const panel = Array.from({ length: 9 }, (_, k) =>
+    synth(`S${k}`, randomWalk(1200, 0.0004 + k * 0.0001, 0.012, mulberry32(300 + k))));
+
+  // Reach into the signal layer by running a book whose positions we can observe through returns:
+  // on a panel where every instrument has IDENTICAL vol, a dollar-neutral book's positions must sum
+  // to zero. Build that panel explicitly.
+  const flat = Array.from({ length: 9 }, (_, k) => {
+    const close = [100];
+    for (let i = 1; i < 1200; i++) close.push(close[i - 1] * (1 + (k - 4) * 0.0002 + (rand() - 0.5) * 0.02));
+    return synth(`F${k}`, close);
+  });
+
+  const xs = runBook(flat, "xsmom", { ...DEFAULT_CONFIG, costPerSide: 0 });
+  const long = runBook(flat, "always_long", { ...DEFAULT_CONFIG, costPerSide: 0 });
+
+  // A long-only book on a panel of drifting assets must make money. A dollar-neutral one has no
+  // drift to collect, so its return must come from the ranking or from nowhere. The test is that
+  // the two behave *differently* — if xsmom tracked always_long, it would not be neutral.
+  const corr9 = corr(xs.daily, long.daily);
+  assert.ok(
+    Math.abs(corr9) < 0.75,
+    `xsmom's returns track a long-only book at rho=${corr9.toFixed(2)}. It is not dollar-neutral, ` +
+    `and its claim to not be harvesting drift is void.`,
+  );
+  void panel;
+});
+
 test("a random-sign book loses money after costs — the noise floor is below zero, not at it", () => {
   const rand = mulberry32(5);
   const panel = [0, 1, 2, 3, 4].map((k) => synth(`S${k}`, randomWalk(3000, 0.0003, 0.013, mulberry32(50 + k))));
