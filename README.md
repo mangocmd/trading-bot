@@ -15,17 +15,25 @@ If you came looking for a strategy to run, close the tab.
 
 **What's actually here, in descending order of how much it is worth your time:**
 
-1. **Two LLM experiments I have not seen run anywhere else.** An LLM reading 240 anonymized charts got
+1. **The experiment that refuted me.** Diversified futures trend-following — 24 markets, four asset
+   classes, 22 years — has **real, statistically significant timing skill** (p = 0.020 against a
+   200-draw synchronized null). I had claimed direction was unforecastable. It isn't. **And the
+   strategy still loses**: 6.1%/yr, against 7.5% for a book the same null proves has *zero* skill, and
+   9.0% for buy-and-hold. The book that can predict finishes third. `npm run tsmom`.
+2. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. On
+   *shuffled* SPY returns — no exploitable structure by construction — **4.7% of long-only candidates
+   still cleared** walk-forward, Monte-Carlo, doubled costs and parameter jitter. Letting the same
+   candidates short took survival to **0.0%**. The statistics here are **not novel** — Timothy Masters
+   wrote a book about it. What's on offer is the measurement, done, in code you can run.
+3. **Two LLM experiments I have not seen run anywhere else.** An LLM reading 240 anonymized charts got
    **43.3%** directional accuracy — worse than a coin flip — and **0%** on the nine calls it made at
    high confidence. An LLM choosing which strategy to run each month, over 107 live decisions, landed
-   in the **36th percentile of 200 random pickers**. Buy-and-hold beat it 3x. Details below.
-2. **A permutation sweep of every candlestick pattern eleven features can express** (753 of them).
-   Direction: 3.0% "significant" on real data vs 3.2% on shuffled — indistinguishable. Volatility:
-   69.4% vs 5.4% — overwhelming. *Volatility clusters; direction doesn't*, measured directly.
-3. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. The
-   statistics here are **not novel** — Timothy Masters wrote a book about it, and the Deflated Sharpe
-   Ratio is the standard analytic version. See the credit section below. What's on offer is the
-   measurement, done, on a realistic modern gauntlet, in code you can run.
+   in the **36th percentile of 200 random pickers**. Buy-and-hold beat it 3x.
+4. **A permutation sweep of every candlestick pattern eleven features can express** (753 of them).
+   Direction: 3.0% "significant" on real data vs 3.2% on shuffled. Volatility: 69.4% vs 5.4%. On a
+   single asset, at a one-day horizon, *volatility clusters and direction doesn't* — but see item 1,
+   which is the same question asked across 24 markets at a twelve-month horizon, and gets a different
+   answer. Both are true. Scope is everything.
 
 ---
 
@@ -168,13 +176,65 @@ six lines. That's what makes it worth adding.
 | variance risk premium | real and persistent (seller wins 84% of months) but 12.0%/yr with a **30.5%** max drawdown. Worse risk-adjusted than owning the index. |
 | martingale, and every reform of it | fair game, zero cost: **80.5% ruin**. With a genuine 52% edge: flat betting is 96.3% profitable with zero ruin; martingale is **66.9% ruin**. Doubling down when losing is Kelly in reverse. |
 | grid / DCA bots | same bot, three worlds: mean-reverting **+41%**, random walk **−1%**, downtrend **−85%**. On real BTC 2021–2025: buy-and-hold +172.6%, equal grid +6.6%, martingale grid **−5.6%**. It is a short-volatility insurance policy, not a strategy. |
+| diversified futures trend-following (24 markets, 4 asset classes, 22 years) | **it has genuine timing skill — and it still loses.** See below. This one refuted me. |
 | volatility-targeted position sizing | **the one thing that worked.** See below. |
+
+### The experiment that proved me wrong
+
+`src/backtest/tsmom.ts` — `npm run tsmom`.
+
+Everything above ran on SPY. The academic case for trend-following lives in the *cross-section*: 67
+markets, four asset classes, a positive return in every decade since 1880 (Hurst, Ooi & Pedersen
+2017). A single-asset test has no power against that claim, so the strongest argument against this
+repository went untested for the whole project. I finally tested it, on its own terms — 24 futures,
+2004–2026, the Moskowitz-Ooi-Pedersen construction, against controls.
+
+**200 permutations of a synchronized null** (one shared reordering of the days, so crashes still
+happen to everything at once and only the *sequence* is destroyed):
+
+| book | real Sharpe | null Sharpe | null beats real | p |
+|---|---|---|---|---|
+| **TSMOM** | **0.46** | **0.08** | **3 / 200** | **0.020** |
+| DRIFT — sign of the historical mean, no forecast at all | 0.42 | 0.30 | 14 / 200 | 0.075 |
+| ALWAYS LONG — sign is always +1 | 0.49 | 0.48 | 93 / 200 | 0.468 |
+
+Read the bottom row first. `always_long` cannot time anything — its signal is the constant +1 — and
+the null reproduces its Sharpe almost exactly (0.49 vs 0.48). **That is what a working null looks
+like**, and it is what licenses the row above it.
+
+**TSMOM reads the sequence. p = 0.020.** Directional timing skill exists, it is measurable, and I
+had claimed it didn't. That claim was wrong.
+
+**And it does not matter:**
+
+```
+TSMOM        (real, measurable skill)   6.1%/yr   Sharpe 0.46
+ALWAYS LONG  (provably zero skill)      7.5%/yr   Sharpe 0.49   <- beats it
+SPY buy & hold (doing nothing at all)   9.0%/yr   Sharpe 0.55   <- beats both
+```
+
+The book with genuine predictive ability finishes **third**, behind a book the null proves has none,
+and behind not trying. This reproduces **Huang, Li, Wang & Zhou (2020)**, *Time-Series Momentum: Is
+It There?*, Journal of Financial Economics: TSMOM is profitable, but indistinguishable from a
+strategy based on the historical sample mean that requires no predictability whatsoever.
+
+**Where the skill genuinely earns its keep: bonds, and only bonds.** The no-forecast control loses
+**95.3%** there — it stays long through 2020–22 and is annihilated. TSMOM flips short and makes
+**+342%**. That is AQR's crisis-alpha claim, and it is real. It is insurance. The premium is paid in
+return.
+
+Two more things the headline hides. The 6.1% needs **~26x leverage** on the short-vol legs (40%/σ on
+a 1.5%-vol two-year note); cap leverage at 1x and TSMOM pays **2.2%/yr**. And the first version of
+the null was broken — see "Eleven times I fooled myself", entry 11.
 
 ### The one thing that worked, and its honest size
 
 `src/backtest/portfolioStrategy.ts`. Hold the index; vary only *how much* you hold, sized so the
-book's forecast volatility stays near a target. It rests on the single thing this project found to be
-genuinely predictable: **volatility clusters, direction does not.**
+book's forecast volatility stays near a target. It rests on the thing this project found to be most
+strongly predictable: **volatility clusters far harder than direction does.**
+
+Note the shape it shares with the TSMOM result above. **Both survivors are insurance, and neither is
+alpha.** That is the closest thing to a positive finding in this repository.
 
 - Same average exposure as a constant-0.93 control: Sharpe **0.77 vs 0.68**, max drawdown **18.0% vs
   35.0%**. Same amount of stock held; half the drawdown. The timing does the work.
@@ -199,7 +259,7 @@ decoration.**
 
 ---
 
-## Ten times I fooled myself, and how each one was caught
+## Eleven times I fooled myself, and how each one was caught
 
 These are the useful part. Every one of them produced a result that looked good, and every one was
 caught by being suspicious of a number that was too pretty.
@@ -254,12 +314,29 @@ caught by being suspicious of a number that was too pretty.
     `evaluate()` directly, then verified: inject the bug, test goes red with a message naming the
     defect. Verify that your test can fail. Then verify it again the next time.
 
-The pattern in all ten: *the result was too good, so I went looking for the bug instead of the
+11. **The null wasn't null. Again.** Building the futures test, I shuffled each of the 24 instruments
+    *independently*. That destroys the time-ordering — which is what I wanted — but it also destroys
+    the **cross-asset correlation**, which I hadn't thought about. In the real world everything
+    crashes at once; in my null the crashes were scattered, so an equal-weighted long book collected
+    a diversification bonus reality had never offered it. The tell was loud: a book that is **always
+    long, and therefore cannot possibly time anything**, scored Sharpe 0.49 on real data and **0.97
+    on the null, beating reality in 200 of 200 draws.** A strategy with no signal cannot beat itself.
+    The null was broken. Fixed by applying **one shared permutation** to every instrument, so a day in
+    the null is a real day. **This is #8 again — the third time a control group turned out not to be
+    controlled**, and the second time it happened in the tool I built to catch other people doing it.
+
+The pattern in all eleven: *the result was too good, so I went looking for the bug instead of the
 champagne.* That habit is the entire methodology. There is nothing else.
 
-Notice that #2 and #10 are the same error, and #8 and #9 were both found while building the tool that
-finds other people's errors. Rigour is not a state you reach. It is a thing you have to keep doing,
-and you will still fail at it.
+Notice that #2 and #10 are the same error, that #8 and #11 are the same error, and that #8, #9 and
+#11 were all found while building the tools that find other people's errors. Rigour is not a state you
+reach. It is a thing you have to keep doing, and you will still fail at it.
+
+The one that should worry you most is #11, because it was caught by a **control**, not by a test.
+Every test I had written passed. What caught it was putting a strategy with *no signal* through the
+null and noticing that it won. **Keep a group in your experiment that is supposed to score zero, and
+look at it every time.** If it ever scores well, you have learned something about your instrument,
+not about the market.
 
 ---
 
