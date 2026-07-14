@@ -16,7 +16,7 @@
 
 import { fetchStockCandles } from "./fetchStocks.js";
 import {
-  runBook, shufflePanel, alignPanel, mulberry32, DEFAULT_CONFIG,
+  runBook, shufflePanel, alignPanel, cleanSeries, mulberry32, DEFAULT_CONFIG,
   type Series, type Control, type Perf, type TsmomConfig,
 } from "./tsmom.js";
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
@@ -90,11 +90,31 @@ const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 async function main() {
   console.log("\nloading 25y of futures data (cached after first run)");
   const { panel: raw, spy: spyRaw } = await load();
+
+  console.log("\n═══ 0. Data integrity ═══");
+  const { cleaned, report } = cleanSeries([...raw, spyRaw]);
+  const dirty = report.filter((r) => r.badTicks > 0 || r.droppedDays > 0);
+  if (dirty.length === 0) console.log("  no impossible prints found.");
+  for (const r of dirty) {
+    console.log(`  ${r.symbol.padEnd(7)} ${r.badTicks} bad tick(s) repaired, ${r.droppedDays} day(s) dropped for non-positive price`);
+  }
+  console.log("  6J=F 2001-12-17 printed 0.000783 between two days of 0.00786 — a misplaced decimal,");
+  console.log("       giving a -90% day and then a +904% day. The yen did not move 904%.");
+  console.log("  CL=F 2020-04-20 closed at -$37.63. That is real, but pct returns across zero are not:");
+  console.log("       the naive maths reports -306%, then -127%. A trend-follower is SHORT crude that");
+  console.log("       month, so a short x -306% books an enormous fictional profit on the single most");
+  console.log("       important day in the sample. Both days dropped.\n");
+
   // SPY is aligned *inside* the same call, so the benchmark and the strategies see the identical
   // set of trading days. Aligning them separately would compare two different windows.
-  const all = alignPanel([...raw, spyRaw]);
+  const all = alignPanel(cleaned);
   const panel = all.slice(0, raw.length);
   const spyAligned = all[all.length - 1];
+
+  // The same panel WITHOUT the cleaning, to prove the conclusion does not live in three bad bars.
+  const allDirty = alignPanel([...raw, spyRaw]);
+  const panelDirty = allDirty.slice(0, raw.length);
+
   const cfg = DEFAULT_CONFIG;
 
   const classes = [...new Set(panel.map((s) => s.assetClass))];
@@ -125,6 +145,10 @@ async function main() {
   row("ALWAYS LONG (dumbest)", alwaysLong, "sign = +1, always");
   row(`RANDOM (mean of ${RANDOM_DRAWS})`, randomMean, "coin-flip signs, same vol scaling");
   row("SPY buy & hold", spy, "the thing to beat");
+
+  console.log("\n  --- the same books on the UNCLEANED data, for comparison ---");
+  row("TSMOM (dirty data)", runBook(panelDirty, "tsmom", cfg), "<- if this differs materially, the");
+  row("ALWAYS LONG (dirty data)", runBook(panelDirty, "always_long", cfg), "   result lived in the bad bars");
 
   console.log("\n═══ 2. EVERY book on SHUFFLED data ═══");
   console.log("  each instrument's returns re-ordered; mean/vol/tails kept, all structure destroyed.");

@@ -285,6 +285,67 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
+export interface CleanReport {
+  symbol: string;
+  badTicks: number;       // spike-and-revert: a huge move immediately undone. A data error.
+  droppedDays: number;    // days at or immediately after a non-positive price.
+}
+
+/**
+ * Removes the two things in Yahoo's continuous futures series that percentage returns cannot survive.
+ * Both were found only by looking for impossible numbers, and both were feeding the result.
+ *
+ * 1. BAD TICKS. 6J=F on 2001-12-17 prints 0.000783 between two days of 0.00786 — a decimal point in
+ *    the wrong place. That is a −90% day followed by a +904% day. The yen did not move 904%.
+ *    Detected as a move over `spike` that is undone by the next bar, and repaired by interpolation.
+ *
+ * 2. NON-POSITIVE PRICES. CL=F closed at −$37.63 on 2020-04-20. That is not an error; it happened.
+ *    But `close[i]/close[i-1] - 1` across zero is not a return, it is a division artefact — the
+ *    naive computation reports −306%, and then −127% the next day when the price returns to +$10.
+ *    A trend-follower is SHORT crude in April 2020, so a short position multiplied by a −306%
+ *    "return" books an enormous fictional profit on the single most important day in the sample.
+ *    Correct P&L across zero needs price differences against a notional, not percentage returns, and
+ *    that is a different engine. So the non-positive day is dropped, along with the day after it,
+ *    whose return is computed from a negative base and is equally meaningless. Two days out of 5,588
+ *    — and `alignPanel` then drops the same two days from every instrument, so the panel stays
+ *    rectangular and no book gets to trade a day another book cannot.
+ *
+ * Everything downstream is reported both with and without this cleaning, because if the conclusion
+ * depends on three bad bars out of 134,000, there is no conclusion.
+ */
+export function cleanSeries(series: Series[], spike = 0.5): { cleaned: Series[]; report: CleanReport[] } {
+  const report: CleanReport[] = [];
+  const cleaned = series.map((s) => {
+    const close = [...s.close];
+    const dates = [...s.dates];
+    let badTicks = 0;
+
+    // A bad tick is a spike that the very next bar undoes. A real move stays.
+    for (let i = 1; i < close.length - 1; i++) {
+      if (close[i] <= 0 || close[i - 1] <= 0 || close[i + 1] <= 0) continue;
+      const up = close[i] / close[i - 1] - 1;
+      const back = close[i + 1] / close[i] - 1;
+      if (Math.abs(up) > spike && Math.abs(back) > spike && Math.sign(up) !== Math.sign(back)) {
+        close[i] = (close[i - 1] + close[i + 1]) / 2;
+        badTicks++;
+      }
+    }
+
+    const drop = new Set<number>();
+    for (let i = 0; i < close.length; i++) {
+      if (close[i] <= 0) { drop.add(i); drop.add(i + 1); }
+    }
+    const keepDates: number[] = [], keepClose: number[] = [];
+    for (let i = 0; i < close.length; i++) {
+      if (!drop.has(i)) { keepDates.push(dates[i]); keepClose.push(close[i]); }
+    }
+
+    report.push({ symbol: s.symbol, badTicks, droppedDays: drop.size });
+    return { ...s, dates: keepDates, close: keepClose };
+  });
+  return { cleaned, report };
+}
+
 /**
  * Aligns a set of series onto their common trading days. Instruments with gaps are dropped, not
  * forward-filled — a fabricated bar can invent a trend that never happened.

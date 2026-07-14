@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runBook, shufflePanel, alignPanel, mulberry32, DEFAULT_CONFIG, type Series, type TsmomConfig } from "./tsmom.js";
+import { runBook, shufflePanel, alignPanel, cleanSeries, mulberry32, DEFAULT_CONFIG, type Series, type TsmomConfig } from "./tsmom.js";
 
 const DAY = 86_400_000;
 const START = Date.UTC(2004, 0, 1);
@@ -166,6 +166,37 @@ test("cost is charged on the change in position, and a flip costs twice a build"
     actualDrag > expectedDrag * 0.4 && actualDrag < expectedDrag * 2.5,
     `drag ${actualDrag.toFixed(4)} is not consistent with turnover ${a.turnover.toFixed(1)}x at 10bp ` +
     `(expected ~${expectedDrag.toFixed(4)}). Costs are being charged on the wrong quantity.`,
+  );
+});
+
+test("a misplaced decimal is repaired, and a negative price is dropped rather than converted into a 'return'", () => {
+  // The two real defects found in Yahoo's continuous futures, reproduced.
+  //
+  // 6J=F: 0.000783 sitting between two days of ~0.00786. A -90% day and then a +904% day.
+  const yen = synth("6J=F", [0.00786, 0.00786, 0.000783, 0.00786, 0.00786]);
+  // CL=F: crude closes at -$37.63 and then recovers to +$10. Percentage returns across zero are not
+  // returns. The naive maths gives -306% and then -127%, and a trend-follower is SHORT crude that
+  // month, so a short times -306% books an enormous fictional profit.
+  const crude = synth("CL=F", [18.27, 18.27, -37.63, 10.01, 13.78]);
+
+  const { cleaned, report } = cleanSeries([yen, crude]);
+
+  const yenReport = report.find((r) => r.symbol === "6J=F")!;
+  assert.equal(yenReport.badTicks, 1, "the misplaced decimal was not detected");
+  const yenReturns = cleaned[0].close.slice(1).map((c, i) => Math.abs(c / cleaned[0].close[i] - 1));
+  assert.ok(Math.max(...yenReturns) < 0.5, `a ${(Math.max(...yenReturns) * 100).toFixed(0)}% day survived cleaning`);
+
+  const crudeReport = report.find((r) => r.symbol === "CL=F")!;
+  assert.ok(crudeReport.droppedDays >= 2, "the negative price and its recovery day were not both dropped");
+  assert.ok(cleaned[1].close.every((c) => c > 0), "a non-positive price survived cleaning");
+
+  // The one that actually mattered. Three bad bars out of 134,000 moved the headline p-value from
+  // 0.075 to 0.020 and reversed the strategy's ranking against a control that forecasts nothing.
+  // Every other guard in this repo is pointed downstream of the data and would never have seen it.
+  const crudeReturns = cleaned[1].close.slice(1).map((c, i) => c / cleaned[1].close[i] - 1);
+  assert.ok(
+    crudeReturns.every((r) => Number.isFinite(r) && Math.abs(r) < 3),
+    "a division artefact across zero survived cleaning — the biggest fake profit in the sample lives here",
   );
 });
 

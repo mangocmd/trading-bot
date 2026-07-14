@@ -15,11 +15,14 @@ If you came looking for a strategy to run, close the tab.
 
 **What's actually here, in descending order of how much it is worth your time:**
 
-1. **The experiment that refuted me.** Diversified futures trend-following — 24 markets, four asset
-   classes, 22 years — has **real, statistically significant timing skill** (p = 0.020 against a
-   200-draw synchronized null). I had claimed direction was unforecastable. It isn't. **And the
-   strategy still loses**: 6.1%/yr, against 7.5% for a book the same null proves has *zero* skill, and
-   9.0% for buy-and-hold. The book that can predict finishes third. `npm run tsmom`.
+1. **The experiment that refuted me, and then unrefuted itself when I checked the data.** I tested
+   diversified futures trend-following (24 markets, four asset classes, 22 years) and got **p =
+   0.020** — real timing skill, contradicting a claim this README led with. I wrote it up and
+   published it. Then I went looking for impossible numbers in the price series and found **three bad
+   bars out of 134,000**. Removing them moved the result to **p = 0.075**, and flipped the strategy
+   from beating a no-forecast control to losing to it. The refutation *was the bad data.* Both
+   versions are printed side by side by `npm run tsmom`. This is the most useful thing in the
+   repository and it is not a finding about markets.
 2. **A false-positive measurement for a strategy-validation gauntlet**, with runnable code. On
    *shuffled* SPY returns — no exploitable structure by construction — **4.7% of long-only candidates
    still cleared** walk-forward, Monte-Carlo, doubled costs and parameter jitter. Letting the same
@@ -30,10 +33,9 @@ If you came looking for a strategy to run, close the tab.
    high confidence. An LLM choosing which strategy to run each month, over 107 live decisions, landed
    in the **36th percentile of 200 random pickers**. Buy-and-hold beat it 3x.
 4. **A permutation sweep of every candlestick pattern eleven features can express** (753 of them).
-   Direction: 3.0% "significant" on real data vs 3.2% on shuffled. Volatility: 69.4% vs 5.4%. On a
-   single asset, at a one-day horizon, *volatility clusters and direction doesn't* — but see item 1,
-   which is the same question asked across 24 markets at a twelve-month horizon, and gets a different
-   answer. Both are true. Scope is everything.
+   Direction: 3.0% "significant" on real data vs 3.2% on shuffled — indistinguishable. Volatility:
+   69.4% vs 5.4% — overwhelming. *Volatility clusters; direction doesn't*, measured directly. Item 1
+   is the closest anything came to overturning this, and on clean data it does not (p = 0.075).
 
 ---
 
@@ -179,53 +181,75 @@ six lines. That's what makes it worth adding.
 | diversified futures trend-following (24 markets, 4 asset classes, 22 years) | **it has genuine timing skill — and it still loses.** See below. This one refuted me. |
 | volatility-targeted position sizing | **the one thing that worked.** See below. |
 
-### The experiment that proved me wrong
+### The experiment that proved me wrong, and the three bad bars that unproved it
 
 `src/backtest/tsmom.ts` — `npm run tsmom`.
 
-Everything above ran on SPY. The academic case for trend-following lives in the *cross-section*: 67
-markets, four asset classes, a positive return in every decade since 1880 (Hurst, Ooi & Pedersen
-2017). A single-asset test has no power against that claim, so the strongest argument against this
-repository went untested for the whole project. I finally tested it, on its own terms — 24 futures,
-2004–2026, the Moskowitz-Ooi-Pedersen construction, against controls.
+Everything else in this repo ran on SPY. The academic case for trend-following lives in the
+*cross-section*: 67 markets, four asset classes, a positive return in every decade since 1880 (Hurst,
+Ooi & Pedersen 2017). A single-asset test has no power against that, so the strongest argument
+against this repository went untested for the whole project.
 
-**200 permutations of a synchronized null** (one shared reordering of the days, so crashes still
-happen to everything at once and only the *sequence* is destroyed):
+I tested it on its own terms — 24 futures, 2004–2026, the Moskowitz-Ooi-Pedersen construction — and
+**it refuted me.** TSMOM showed real timing skill at **p = 0.020** against a 200-draw null. I wrote
+that up, promoted it to the top of this README, committed it, and pushed.
 
-| book | real Sharpe | null Sharpe | null beats real | p |
+Then I went looking for impossible numbers in the input data.
+
+**Two of them, in 134,000 bars:**
+
+- **6J=F, 2001-12-17.** The yen future prints `0.000783` between two days of `0.00786`. A misplaced
+  decimal. It is recorded as a −90% day followed by a **+904%** day. The yen did not move 904%.
+- **CL=F, 2020-04-20.** Crude closed at **−$37.63**. That is not an error — it happened. But
+  `close[i]/close[i-1] − 1` across zero is not a return, it is a division artefact: the naive maths
+  reports **−306%**, then **−127%** the next day when the price returns to +$10. **A trend-follower is
+  short crude that month.** A short position times a −306% "return" books an enormous fictional profit
+  on the single most consequential day in the sample.
+
+Drop those days. Repair the tick. Re-run:
+
+| book | | real | null | p |
 |---|---|---|---|---|
-| **TSMOM** | **0.46** | **0.08** | **3 / 200** | **0.020** |
-| DRIFT — sign of the historical mean, no forecast at all | 0.42 | 0.30 | 14 / 200 | 0.075 |
-| ALWAYS LONG — sign is always +1 | 0.49 | 0.48 | 93 / 200 | 0.468 |
+| **TSMOM** | with the bad bars | 0.46 | 0.08 | **0.020** |
+| | **cleaned** | **0.44** | **0.11** | **0.075** |
+| DRIFT — sign of the historical mean, no forecast at all | with the bad bars | 0.42 | 0.30 | 0.075 |
+| | **cleaned** | **0.47** | **0.36** | **0.085** |
+| ALWAYS LONG — sign is always +1 | with the bad bars | 0.49 | 0.48 | 0.468 |
+| | **cleaned** | **0.52** | **0.53** | **0.602** |
 
-Read the bottom row first. `always_long` cannot time anything — its signal is the constant +1 — and
-the null reproduces its Sharpe almost exactly (0.49 vs 0.48). **That is what a working null looks
-like**, and it is what licenses the row above it.
+**Three bad bars carried the p-value from 0.075 to 0.020, and flipped TSMOM from *losing* to a
+control that forecasts nothing (0.44 vs 0.47) to *beating* it (0.46 vs 0.42).** The refutation was the
+bad data.
 
-**TSMOM reads the sequence. p = 0.020.** Directional timing skill exists, it is measurable, and I
-had claimed it didn't. That claim was wrong.
+Read `always_long` to see the null is working: its signal is the constant +1, it cannot time anything,
+and the null reproduces its Sharpe almost exactly (0.52 vs 0.53). **That is what a functioning control
+group looks like**, and it is what licenses reading the rows above it.
 
-**And it does not matter:**
+**Where that leaves the claim.** On clean data, p = 0.075. Not nothing — 14 of 200 — and the sign is
+consistent. But not significant, and the honest reading is *suggestive of weak timing skill, not
+evidence of it.* Whatever is there earns less than doing nothing:
 
 ```
-TSMOM        (real, measurable skill)   6.1%/yr   Sharpe 0.46
-ALWAYS LONG  (provably zero skill)      7.5%/yr   Sharpe 0.49   <- beats it
-SPY buy & hold (doing nothing at all)   9.0%/yr   Sharpe 0.55   <- beats both
+TSMOM        (p = 0.075, so: maybe)   5.8%/yr   Sharpe 0.44
+DRIFT        (forecasts nothing)      6.1%/yr   Sharpe 0.47   <- beats it
+ALWAYS LONG  (provably zero skill)    8.0%/yr   Sharpe 0.52   <- beats it
+SPY buy & hold (doing nothing)        9.0%/yr   Sharpe 0.55   <- beats all
 ```
 
-The book with genuine predictive ability finishes **third**, behind a book the null proves has none,
-and behind not trying. This reproduces **Huang, Li, Wang & Zhou (2020)**, *Time-Series Momentum: Is
-It There?*, Journal of Financial Economics: TSMOM is profitable, but indistinguishable from a
-strategy based on the historical sample mean that requires no predictability whatsoever.
+TSMOM loses to DRIFT in **all three** of the regime splits. This is **Huang, Li, Wang & Zhou (2020)**,
+*Time-Series Momentum: Is It There?*, Journal of Financial Economics, reproduced: TSMOM is profitable,
+but indistinguishable from a strategy based on the historical sample mean that requires no
+predictability whatsoever.
 
-**Where the skill genuinely earns its keep: bonds, and only bonds.** The no-forecast control loses
-**95.3%** there — it stays long through 2020–22 and is annihilated. TSMOM flips short and makes
-**+342%**. That is AQR's crisis-alpha claim, and it is real. It is insurance. The premium is paid in
-return.
+**One finding survives the cleaning, and it is the AQR one.** Bonds. The no-forecast control stays
+long through 2020–22 and is annihilated: **−95.3%**, a 97.3% drawdown. TSMOM flips short and makes
+**+342%**. That is crisis alpha, it is real, and cleaning the data does not touch it. **It is
+insurance, and the premium is paid in return** — the same shape as the volatility-managed sizing
+below, which is the only other survivor here.
 
-Two more things the headline hides. The 6.1% needs **~26x leverage** on the short-vol legs (40%/σ on
-a 1.5%-vol two-year note); cap leverage at 1x and TSMOM pays **2.2%/yr**. And the first version of
-the null was broken — see "Eleven times I fooled myself", entry 11.
+Two things the headline still hides. That 5.8% needs **~26x notional leverage** on the low-vol legs
+(40%/σ on a 1.5%-vol two-year note); cap leverage at 1x and TSMOM pays **1.8%/yr**. And the first
+version of the null was broken in a different way — see entries 11 and 12 below.
 
 ### The one thing that worked, and its honest size
 
@@ -259,7 +283,7 @@ decoration.**
 
 ---
 
-## Eleven times I fooled myself, and how each one was caught
+## Twelve times I fooled myself, and how each one was caught
 
 These are the useful part. Every one of them produced a result that looked good, and every one was
 caught by being suspicious of a number that was too pretty.
@@ -325,18 +349,41 @@ caught by being suspicious of a number that was too pretty.
     the null is a real day. **This is #8 again — the third time a control group turned out not to be
     controlled**, and the second time it happened in the tool I built to catch other people doing it.
 
-The pattern in all eleven: *the result was too good, so I went looking for the bug instead of the
-champagne.* That habit is the entire methodology. There is nothing else.
+12. **I published a refutation of myself, and the refutation was three bad bars.** The futures result
+    above came out at p = 0.020, contradicting a claim this README opened with. It is a *good* result
+    — it makes me look rigorous, it makes the project look honest, it is exactly the kind of finding
+    you want to lead with. **So I led with it, committed it, and pushed it.** Only afterwards did I
+    audit the input data for impossible prints, and find a yen future that had "moved 904%" and a
+    crude future whose −$37 close was being converted into a −306% "return" against a book that was
+    short crude that month. Cleaning three bars out of 134,000 took p to 0.075 and reversed the
+    strategy's ranking against a control that forecasts nothing.
 
-Notice that #2 and #10 are the same error, that #8 and #11 are the same error, and that #8, #9 and
-#11 were all found while building the tools that find other people's errors. Rigour is not a state you
-reach. It is a thing you have to keep doing, and you will still fail at it.
+    **The lesson is not "check your data."** Everybody says that. The lesson is that I ran the
+    permutation test, the synchronized null, the leverage sensitivity, the cost sensitivity, the
+    regime splits and seven tests verified to fail against injected bugs — **and shipped it without
+    once asking whether the numbers going in were physically possible.** Every guard I had was aimed
+    downstream of the data. A price of −$37 and a 904% day were sitting there in plain sight, and no
+    amount of methodological rigour applied *after* them would ever have found them.
 
-The one that should worry you most is #11, because it was caught by a **control**, not by a test.
-Every test I had written passed. What caught it was putting a strategy with *no signal* through the
-null and noticing that it won. **Keep a group in your experiment that is supposed to score zero, and
-look at it every time.** If it ever scores well, you have learned something about your instrument,
-not about the market.
+    I only looked because I had been asked to red-team myself for the second time and had run out of
+    clever things to check.
+
+The pattern in most of these: *the result was too good, so I went looking for the bug instead of the
+champagne.* That habit is most of the methodology.
+
+But look at what it missed. #2 and #10 are the same error. #8 and #11 are the same error. #8, #9 and
+#11 were all found while building the tools that find other people's errors. And #12 got past every
+one of those tools, because they were all pointed the wrong way. Rigour is not a state you reach.
+
+**Two things caught what the tests could not:**
+
+- **A control group that is supposed to score zero.** #11 was found because a book that is always
+  long — and therefore cannot time anything — beat reality in 200 of 200 null draws. Every test I had
+  written passed. Keep a group in the experiment that should score zero, and look at it every single
+  time. If it wins, you have learned about your instrument, not about the market.
+- **Asking whether the inputs are physically possible.** #12 was found by scanning for returns larger
+  than 8σ and asking "could that have happened?" Two could not. That check is four lines long and it
+  outranked every sophisticated thing in this repository.
 
 ---
 
