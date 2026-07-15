@@ -22,7 +22,8 @@
     "killswitch": "tsx src/backtest/runKillSwitch.ts",
     "gamble": "tsx src/backtest/runGamble.ts",
     "levtrend": "tsx src/backtest/runLevTrend.ts",
-    "retail": "tsx src/backtest/runRetail.ts"
+    "retail": "tsx src/backtest/runRetail.ts",
+    "growthensafe": "tsx src/backtest/runGrowThenSafe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
