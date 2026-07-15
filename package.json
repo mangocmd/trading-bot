@@ -12,7 +12,11 @@
     "gauntlet": "tsx src/backtest/runGauntlet.ts",
     "tsmom": "tsx src/backtest/runTsmom.ts",
     "xsmom": "tsx src/backtest/runXsmom.ts",
-    "dispersion": "tsx src/backtest/runDispersion.ts"
+    "dispersion": "tsx src/backtest/runDispersion.ts",
+    "leverage": "tsx src/backtest/runLeverage.ts",
+    "crypto": "tsx src/backtest/runCrypto.ts",
+    "persistence": "tsx src/backtest/runPersistence.ts",
+    "cryptomom": "tsx src/backtest/runCryptoMom.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
