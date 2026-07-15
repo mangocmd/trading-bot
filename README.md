@@ -192,6 +192,13 @@ six lines. That's what makes it worth adding.
 | martingale, and every reform of it | fair game, zero cost: **80.5% ruin**. With a genuine 52% edge: flat betting is 96.3% profitable with zero ruin; martingale is **66.9% ruin**. Doubling down when losing is Kelly in reverse. |
 | grid / DCA bots | same bot, three worlds: mean-reverting **+41%**, random walk **−1%**, downtrend **−85%**. On real BTC 2021–2025: buy-and-hold +172.6%, equal grid +6.6%, martingale grid **−5.6%**. It is a short-volatility insurance policy, not a strategy. |
 | diversified futures trend-following (24 markets, 4 asset classes, 22 years) | **it has genuine timing skill — and it still loses.** See below. This one refuted me. |
+| crypto momentum at crypto's own 1-week horizon | Sharpe 0.78, survives fees, **p = 0.005** — then **−0.16 since 2024**. Published in a top journal in 2022; a live specimen of McLean-Pontiff post-publication decay. |
+| the funding book, with LUNA and FTT put back | survivors-only Sharpe 0.76 → **0.43** once the two most famous dead coins are in the universe. Half the edge was survivorship, and that is a lower bound. |
+| "just profit short-term": strategy persistence | recent winners keep winning at **p = 0.002** — and the tradeable spread is **0.17%/yr**, factor Sharpe **0.008**. Real and worth nothing. |
+| "just profit short-term": a kill switch on a decaying signal | every trailing window did **worse** than always-on and was indistinguishable from random on/off. Regime is only visible from behind. |
+| leveraged trend-timing (3x above the 200-day MA) | the MA beats random timing (**p = 0.008**) — yet **6.9%/yr vs 7.6% for 1x hold**, bigger drawdown, and the filter failed the fast crash (2020: −45%) and the choppy one (2022: −38%). |
+| "can I just gamble?" (10,000 zero-edge bettors) | at 100%/bet: median **−49%**, **49% ruined** — and **61% peaked +20%** and felt like geniuses. The only positive-EV bet is owning the drift. |
+| **every popular retail strategy, one table** (MA timing, golden cross, RSI2, MACD, Bollinger, dip-buying, dual momentum, seasonals) | **0 of 11 beat buy-and-hold.** 6 of 11 beat random timing at their own exposure — real skill — but all convert return into a smoother path. `npm run retail`. |
 | volatility-targeted position sizing | **the one thing that worked.** See below. |
 
 ### The experiment that proved me wrong, and the three bad bars that unproved it
@@ -393,6 +400,32 @@ ablation over 9 sector ETFs, 10 years, four non-overlapping blocks found the eng
 half the return (4.3%/yr vs 9.6%) and bought no extra protection (17.0% vs 18.0% drawdown) — in every
 block. So they were deleted. **Everything that worked was the sizing; the signals on top were
 decoration.**
+
+---
+
+## The shape of every survivor: it is insurance, and it is never alpha
+
+By the end, several things had genuinely survived their controls — and every one of them turned out to
+be the same shape wearing a different name. This is the finding the whole repo converges on, so it is
+worth stating as one table. Each row has *real* signal (it beats its null); not one earns more money
+than owning the index outright.
+
+| survivor | real edge, confirmed by | what it actually gives you |
+|---|---|---|
+| volatility-managed sizing | Moreira-Muir 2017; 36/36 grid | half the drawdown, **less** return |
+| futures cross-sectional momentum | p = 0.025; beats random L/S 0/50 | Sharpe 0.55, uncorrelated, **less** return |
+| 200-day / 10-month MA timing | beats random timing p ≈ 0.03 | Sharpe 0.60, 21% drawdown, **less** return |
+| a zero-beta sleeve beside SPY | corr −0.00; blend Sharpe 0.55 → 0.71 | smoother path, **less** return |
+
+And the popular-strategy sweep (`npm run retail`) is the same lesson at the level of the whole retail
+canon: **0 of 11 beat buy-and-hold on return; 6 of 11 have real timing skill.** Skill is common. Skill
+that makes *more money than doing nothing* is absent. What every real signal does is convert return
+into a smoother ride — which is worth something to someone who cannot sit through a −56% drawdown, and
+worth nothing to someone who can.
+
+The one bet with positive expected value, confirmed from every angle in this repo, is owning the drift
+and sizing it so a halving does not force you to sell. Everything cleverer is a way of paying costs to
+move off that weighted coin onto a fairer one.
 
 ---
 

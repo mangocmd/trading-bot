@@ -16,7 +16,13 @@
     "leverage": "tsx src/backtest/runLeverage.ts",
     "crypto": "tsx src/backtest/runCrypto.ts",
     "persistence": "tsx src/backtest/runPersistence.ts",
-    "cryptomom": "tsx src/backtest/runCryptoMom.ts"
+    "cryptomom": "tsx src/backtest/runCryptoMom.ts",
+    "funding": "tsx src/backtest/runFunding.ts",
+    "funding-knife": "tsx src/backtest/runFundingKnife.ts",
+    "killswitch": "tsx src/backtest/runKillSwitch.ts",
+    "gamble": "tsx src/backtest/runGamble.ts",
+    "levtrend": "tsx src/backtest/runLevTrend.ts",
+    "retail": "tsx src/backtest/runRetail.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
